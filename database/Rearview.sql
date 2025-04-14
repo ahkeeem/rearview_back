@@ -43,3 +43,5 @@ CREATE TABLE reviews (
 
 
 SELECT * FROM users;
+
+

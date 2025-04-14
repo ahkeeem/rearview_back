@@ -70,6 +70,25 @@ const reviewController = {
         }
     },
 
+
+    getUserReviews: async (req, res) => {
+        try {
+            const userId = req.params.userId;
+            const [reviews] = await pool.execute(
+                `SELECT r.*, u.name as reviewer_name 
+                 FROM reviews r 
+                 JOIN users u ON r.reviewer_id = u.id 
+                 WHERE r.reviewee_id = ?
+                 ORDER BY r.created_at DESC`,
+                [userId]
+            );
+            res.json(reviews);
+        } catch (err) {
+            console.error('Error fetching reviews:', err);
+            res.status(500).json({ error: 'Failed to fetch reviews' });
+        }
+    },
+
     // Update Review
     updateReview: async (req, res) => {
         try {

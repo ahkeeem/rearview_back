@@ -1,26 +1,30 @@
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const userRoutes = require('./src/routes/userRoutes'); // Import your routes
-const userController = require('./src/controllers/userController');
+const socketIo = require('socket.io');
+const messageHandler = require('./src/websocket/messageHandler');
+const http = require('http');
+const app = require('./src/app');
 
-const app = express();
+// Create HTTP server
+const server = http.createServer(app);
 
-// Middleware
-app.use(cors());
-app.use(bodyParser.json());
-
-// Route for API Home
-app.get('/api', (req, res) => {
-  res.send('Welcome to the API');
+// Initialize Socket.IO with CORS configuration
+const io = socketIo(server, {
+    cors: {
+      origin: "http://localhost:3000",
+      methods: ["GET", "POST"],
+      credentials: true
+    }
 });
 
-// User-related routes (including login, registration, etc.)
-app.use('/api/users', userRoutes); 
-app.post('/api/login', userController.loginUser); 
+// Initialize socket handlers
+messageHandler(io);
 
-// Start the server
+// Make io available in request object
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on http://192.168.0.102:${PORT}`);
 });

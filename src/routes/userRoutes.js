@@ -1,19 +1,24 @@
-// src/routes/userRoutes.js
 const express = require('express');
-const userController = require('../controllers/userController');
 const router = express.Router();
+const userController = require('../controllers/userController');
+const verifyToken = require('../middlewares/authMiddleware');
 
-// Landing page for /api
-router.get('/', (req, res) => {
-  res.status(200).json({ message: 'Welcome to the API! Available routes: /api/users' });
-});
-
-// Handle GET request to /api/users
-router.get('/users', userController.getUsers);
-
-// Handle POST request to /api/users
-router.post('/users', userController.createUser);
-
+// Public routes
+router.post('/', userController.createUser);
 router.post('/login', userController.loginUser);
 
+// Protected routes - require authentication
+router.get('/', verifyToken, userController.getUsers);
+router.get('/search', verifyToken, userController.searchUsers);
+router.get('/:userId/stats', verifyToken, userController.getUserStats);
+router.get('/:userId/stats', verifyToken, userController.getUserStats);
+router.get('/profile/:id', verifyToken, userController.getUserProfile);
+router.put('/profile/:id', verifyToken, userController.updateProfile);
+router.post('/verify', verifyToken, userController.submitVerification)
+router.get('/verify/status', verifyToken, userController.getVerificationStatus)
+
+
 module.exports = router;
+
+
+

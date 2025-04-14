@@ -1,21 +1,24 @@
 const jwt = require('jsonwebtoken');
+const pool = require('../config/database');
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
-const verifyToken = (req, res, next) => {
-  const token = req.headers['authorization']?.split(' ')[1]; // Expecting "Bearer <token>"
-
-  if (!token) {
-    return res.status(403).json({ error: 'No token provided.' });
-  }
-
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
-    if (err) {
-      return res.status(403).json({ error: 'Invalid token.' });
+const verifyToken = async (req, res, next) => {
+    try {
+        const token = req.headers['authorization']?.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        
+        // Set the user object with the userId from token
+        req.user = {
+            userId: decoded.userId  // This matches the token payload structure
+        };
+        
+        console.log('Token decoded:', decoded);
+        console.log('User set in request:', req.user);
+        next();
+    } catch (err) {
+        console.error('Authentication error:', err.message);
+        res.status(401).json({ error: 'Failed to authenticate token' });
     }
-
-    req.user = decoded; // Store decoded user information in the request
-    next(); // Proceed to the next middleware or route handler
-  });
 };
 
 module.exports = verifyToken;
