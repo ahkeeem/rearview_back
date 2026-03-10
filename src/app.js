@@ -18,6 +18,9 @@ const messageRoutes = require('./routes/messageRoutes');
 
 const app = express();
 
+// Behind Render/Cloudflare proxies: required for accurate rate limiting (X-Forwarded-For)
+app.set('trust proxy', 1);
+
 // Security middleware
 app.use(securityHeaders);
 
