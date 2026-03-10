@@ -22,14 +22,33 @@ const adminVerificationController = {
         try {
             const { verificationId } = req.params;
             const { status, reviewNotes } = req.body;
+            const adminId = req.admin.id;
+            
+            if (!status || !['approved', 'rejected'].includes(status)) {
+                return res.status(400).json({ error: 'Invalid status. Must be approved or rejected' });
+            }
             
             const [result] = await pool.execute(
                 'UPDATE verifications SET status = ?, review_notes = ?, reviewed_at = NOW(), reviewed_by = ? WHERE id = ?',
-                [status, reviewNotes, req.user.id, verificationId]
+                [status, reviewNotes || null, adminId, verificationId]
             );
             
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'Verification not found' });
+            }
+            
+            // If approved, update user verification status
+            if (status === 'approved') {
+                const [verification] = await pool.execute(
+                    'SELECT user_id FROM verifications WHERE id = ?',
+                    [verificationId]
+                );
+                if (verification.length > 0) {
+                    await pool.execute(
+                        'UPDATE users SET is_verified = TRUE WHERE id = ?',
+                        [verification[0].user_id]
+                    );
+                }
             }
             
             res.json({ message: 'Verification review completed' });

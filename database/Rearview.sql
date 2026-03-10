@@ -42,6 +42,8 @@ CREATE TABLE reviews (
 );
 
 
-SELECT * FROM users;
+SELECT * FROM users
+WHERE email like '%yahoo%';
 
 
+SHOW TABLES;

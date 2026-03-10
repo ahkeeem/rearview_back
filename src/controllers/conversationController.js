@@ -4,13 +4,7 @@ const conversationController = {
     createConversation: async (req, res) => {
         try {
             const { userId } = req.body;  // Match the incoming request format
-            const currentUserId = req.user.userId;  // Match token payload
-            
-            console.log('Debug values:', {
-                userId,
-                currentUserId,
-                body: req.body
-            });
+            const currentUserId = req.user.userId || req.user.id;  // Match token payload
 
             // Validate parameters
             if (!userId || !currentUserId) {
@@ -21,18 +15,31 @@ const conversationController = {
                 });
             }
 
-            // When querying database, map to database field names
+            // Check if users are connected
             const [connections] = await pool.execute(
-                'SELECT * FROM connections WHERE (user_id = ? AND connected_user_id = ?) OR (user_id = ? AND connected_user_id = ?)',
+                'SELECT * FROM connections WHERE ((user_id = ? AND connected_user_id = ?) OR (user_id = ? AND connected_user_id = ?)) AND status = "accepted"',
                 [currentUserId, userId, userId, currentUserId]
             );
 
             if (connections.length === 0) {
-                console.log('Connection check failed: Users not connected');
                 return res.status(403).json({ error: 'Users must be connected to start a conversation' });
             }
 
-            console.log('Users are connected, proceeding with conversation creation');
+            // Check if conversation already exists
+            const [existingConversations] = await pool.execute(`
+                SELECT c.id 
+                FROM conversations c
+                JOIN conversation_participants cp1 ON c.id = cp1.conversation_id
+                JOIN conversation_participants cp2 ON c.id = cp2.conversation_id
+                WHERE cp1.user_id = ? AND cp2.user_id = ?
+            `, [currentUserId, userId]);
+
+            if (existingConversations.length > 0) {
+                return res.status(200).json({
+                    message: 'Conversation already exists',
+                    conversationId: existingConversations[0].id
+                });
+            }
 
             // Continue with conversation creation...
             const connection = await pool.getConnection();
@@ -55,7 +62,6 @@ const conversationController = {
                 await connection.commit();
                 connection.release();
 
-                console.log('Conversation created successfully:', { conversationId });
                 res.status(201).json({
                     message: 'Conversation created successfully',
                     conversationId
@@ -66,26 +72,34 @@ const conversationController = {
                 throw err;
             }
         } catch (err) {
-            console.error('Values causing error:', {
-                userId: req.body.userId,
-                currentUserId: req.user?.userId
-            });
+            console.error('Error creating conversation:', err);
             res.status(500).json({ 
                 error: 'Failed to create conversation',
                 details: err.message
             });
         }
-    },    getUserConversations: async (req, res) => {
+    },
+    
+    getUserConversations: async (req, res) => {
         try {
-            const userId = req.user.id;
+            const userId = req.user.userId || req.user.id;
             const [conversations] = await pool.execute(
-                `SELECT DISTINCT c.* 
+                `SELECT DISTINCT 
+                    c.id,
+                    c.created_at,
+                    c.updated_at,
+                    (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message,
+                    (SELECT created_at FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message_time,
+                    (SELECT name FROM users u 
+                     JOIN conversation_participants cp2 ON u.id = cp2.user_id 
+                     WHERE cp2.conversation_id = c.id AND cp2.user_id != ? LIMIT 1) as participant_name,
+                    (SELECT id FROM users u 
+                     JOIN conversation_participants cp2 ON u.id = cp2.user_id 
+                     WHERE cp2.conversation_id = c.id AND cp2.user_id != ? LIMIT 1) as participant_id
                 FROM conversations c
                 JOIN conversation_participants cp ON c.id = cp.conversation_id
-                JOIN connections conn ON 
-                    (conn.user_id = ? AND conn.connected_user_id = cp.user_id) OR 
-                    (conn.user_id = cp.user_id AND conn.connected_user_id = ?)
-                WHERE cp.user_id != ?`,
+                WHERE cp.user_id = ?
+                ORDER BY c.updated_at DESC`,
                 [userId, userId, userId]
             );
             

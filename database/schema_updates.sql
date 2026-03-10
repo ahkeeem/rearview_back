@@ -64,11 +64,11 @@ CREATE INDEX idx_activity_type ON activity_logs(action_type);
 
 
 
-select * from users;
+-- select * from users;
 
-SELECT * FROM reviews;
+-- SELECT * FROM reviews;
 
-UPDATE users SET role = 'admin' WHERE id = 11;
+-- UPDATE users SET role = 'admin' WHERE id = 11;
 
 
 CREATE TABLE conversations (
@@ -97,35 +97,35 @@ CREATE TABLE messages (
 );
 
 
-select * from conversation_participants;
+-- select * from conversation_participants;
 
-SHOW TABLE STATUS LIKE 'conversations';
-
-
+-- SHOW TABLE STATUS LIKE 'conversations';
 
 
-curl -X PUT \
-   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjExLCJpYXQiOjE3MzkyMzA1MDIsImV4cCI6MTczOTIzNDEwMn0.TbP6XITOA0lja2dp3urbD55GZlNJXSQzjFralBuO6Aw" \
-  -H "Content-Type: application/json" \
-  -d '{"status": "VERIFIED"}' \
-  http://localhost:4000/api/admin/verifications/5
 
 
-Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjExLCJpYXQiOjE3MzkyMzA1MDIsImV4cCI6MTczOTIzNDEwMn0.TbP6XITOA0lja2dp3urbD55GZlNJXSQzjFralBuO6Aw
+-- curl -X PUT \
+--    -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjExLCJpYXQiOjE3MzkyMzA1MDIsImV4cCI6MTczOTIzNDEwMn0.TbP6XITOA0lja2dp3urbD55GZlNJXSQzjFralBuO6Aw" \
+--   -H "Content-Type: application/json" \
+--   -d '{"status": "VERIFIED"}' \
+--   http://localhost:4000/api/admin/verifications/5
 
-curl -X POST http://localhost:4000/api/users/login \
--H "Content-Type: application/json" \
--d '{"email": "simon@example.com", "password": "TestPass123!"}'
 
-curl http://localhost:4000/api/reports \
--H "Authorization: Bearer ADMIN_TOKEN_HERE"
+-- Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjExLCJpYXQiOjE3MzkyMzA1MDIsImV4cCI6MTczOTIzNDEwMn0.TbP6XITOA0lja2dp3urbD55GZlNJXSQzjFralBuO6Aw
+
+-- curl -X POST http://localhost:4000/api/users/login \
+-- -H "Content-Type: application/json" \
+-- -d '{"email": "simon@example.com", "password": "TestPass123!"}'
+
+-- curl http://localhost:4000/api/reports \
+-- -H "Authorization: Bearer ADMIN_TOKEN_HERE"
 
 
 curl http://localhost:4000/api/users/1/stats \
 -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjExLCJpYXQiOjE3Mzk2NTY3MjEsImV4cCI6MTczOTc0MzEyMX0.nRGmrunVQK8rFlCfJoeCZFzS0XEEpfZ4jYxOlqewGzU"
 
-curl -X POST "http://localhost:4000/api/reports" \
--H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsImlhdCI6MTczOTY2MDcyOSwiZXhwIjoxNzM5NzQ3MTI5fQ.XQY7stvsqgazePaHiOkmZ6jR_XuNkIyUT4adT7MKlX8"\
--H "Content-Type: application/json" \
--d '{"reported_user_id": 1, "reason": "Suspicious behavior", "description": "Test report"}'
+-- curl -X POST "http://localhost:4000/api/reports" \
+-- -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsImlhdCI6MTczOTY2MDcyOSwiZXhwIjoxNzM5NzQ3MTI5fQ.XQY7stvsqgazePaHiOkmZ6jR_XuNkIyUT4adT7MKlX8"\
+-- -H "Content-Type: application/json" \
+-- -d '{"reported_user_id": 1, "reason": "Suspicious behavior", "description": "Test report"}'
 

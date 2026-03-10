@@ -1,66 +1,35 @@
 const pool = require('../config/database');
 
-// Get all conversations for a user
-const getConversations = async (req, res) => {
-    const userId = req.user.id;
-    try {
-        const [conversations] = await pool.execute(`
-            SELECT c.*, m.content as last_message, m.created_at as last_message_time,
-            u.name as participant_name
-            FROM conversations c
-            JOIN conversation_participants cp ON c.id = cp.conversation_id
-            JOIN users u ON cp.user_id = u.id
-            LEFT JOIN messages m ON c.id = m.conversation_id
-            WHERE cp.user_id = ?
-            ORDER BY c.updated_at DESC`, [userId]
-        );
-        res.json(conversations);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-};
-
-// Get single conversation by ID
-const getConversationById = async (req, res) => {
-    try {
-        const conversation = await Conversation.findById(req.params.id)
-            .populate('participants lastMessage');
-        res.json(conversation);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
-
-// Create new conversation
-const createConversation = async (req, res) => {
-    try {
-        const { participants } = req.body;
-        const conversation = new Conversation({
-            participants: [...participants, req.user._id]
-        });
-        await conversation.save();
-        res.status(201).json(conversation);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
-
 const messageController = {
     createMessage: async (req, res) => {
         try {
             const { conversationId, content } = req.body;
-            const userId = req.user.userId;
+            const userId = req.user.userId || req.user.id;
 
-            console.log('Message creation attempt:', {
-                conversationId,
-                content,
-                userId
-            });
+            if (!conversationId || !content) {
+                return res.status(400).json({ error: 'Conversation ID and content are required' });
+            }
+
+            // Verify user is a participant in the conversation
+            const [participants] = await pool.execute(
+                'SELECT user_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?',
+                [conversationId, userId]
+            );
+
+            if (participants.length === 0) {
+                return res.status(403).json({ error: 'You are not a participant in this conversation' });
+            }
 
             // Insert message
             const [result] = await pool.execute(
                 'INSERT INTO messages (conversation_id, sender_id, content) VALUES (?, ?, ?)',
                 [conversationId, userId, content]
+            );
+
+            // Update conversation updated_at timestamp
+            await pool.execute(
+                'UPDATE conversations SET updated_at = NOW() WHERE id = ?',
+                [conversationId]
             );
 
             res.status(201).json({
@@ -76,16 +45,29 @@ const messageController = {
     getMessagesByConversation: async (req, res) => {
         try {
             const { conversationId } = req.params;
+            const userId = req.user.userId || req.user.id;
+
+            // Verify user is a participant
+            const [participants] = await pool.execute(
+                'SELECT user_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?',
+                [conversationId, userId]
+            );
+
+            if (participants.length === 0) {
+                return res.status(403).json({ error: 'You are not a participant in this conversation' });
+            }
+
             const [messages] = await pool.execute(
                 `SELECT 
-                    m.*,
-                    u.name as sender_name,
-                    cp.user_id as recipient_id
+                    m.id,
+                    m.conversation_id,
+                    m.sender_id,
+                    m.content,
+                    m.created_at,
+                    u.name as sender_name
                 FROM messages m
                 JOIN users u ON m.sender_id = u.id
-                JOIN conversation_participants cp ON m.conversation_id = cp.conversation_id
                 WHERE m.conversation_id = ? 
-                AND cp.user_id != m.sender_id
                 ORDER BY m.created_at ASC`,
                 [conversationId]
             );
@@ -94,11 +76,7 @@ const messageController = {
             console.error('Error fetching messages:', err);
             res.status(500).json({ error: 'Failed to fetch messages' });
         }
-    }};
-
-module.exports = {
-    getConversations,
-    getConversationById,
-    createConversation,
-    ...messageController
+    }
 };
+
+module.exports = messageController;

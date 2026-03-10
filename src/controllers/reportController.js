@@ -2,16 +2,13 @@ const pool = require('../config/database');
 const reportController = {
     createReport: async (req, res) => {
         try {
-            console.log('Request body:', req.body);
             const { reported_id, reason, description } = req.body;
-            const reporter_id = req.user.userId;
+            const reporter_id = req.user.userId || req.user.id;
             
-            console.log('Extracted values:', {
-                reporter_id,
-                reported_id,
-                reason, 
-                description
-            });
+            if (!reported_id || !reason) {
+                return res.status(400).json({ error: 'Reported user ID and reason are required' });
+            }
+            
 
             const [result] = await pool.execute(
                 'INSERT INTO reports (reporter_id, reported_id, reason, description, status) VALUES (?, ?, ?, ?, "pending")',
@@ -23,8 +20,7 @@ const reportController = {
                 reportId: result.insertId
             });
         } catch (err) {
-            console.error('Request body:', req.body);
-            console.error('Values causing error:', err.message);
+            console.error('Error submitting report:', err.message);
             res.status(500).json({ error: 'Failed to submit report' });
         }
     },    
@@ -50,27 +46,29 @@ const reportController = {
         try {
             const { id } = req.params;
             const { status } = req.body;
-            const admin_id = req.user.id;
+            const admin_id = req.user.userId || req.user.id;
+
+            if (!status || !['pending', 'resolved', 'dismissed'].includes(status)) {
+                return res.status(400).json({ error: 'Invalid status. Must be pending, resolved, or dismissed' });
+            }
 
             const [result] = await pool.execute(
-                'UPDATE reports SET status = ? WHERE id = ?',
-                [status, id]
+                'UPDATE reports SET status = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?',
+                [status, admin_id, id]
             );
 
-            // If report is resolved as valid, update trust score
-            if (status === 'resolved') {
-                const [report] = await pool.execute(
-                    'SELECT reported_id FROM reports WHERE id = ?',
-                    [id]
-                );
-                // Trigger trust score recalculation
-                await updateUserTrustScore(report[0].reported_id);
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'Report not found' });
             }
+
+            // Note: Trust score recalculation should be handled asynchronously
+            // or through a separate service/queue system for better performance
+            // For now, we'll just update the report status
 
             res.json({ message: 'Report status updated successfully' });
         } catch (err) {
             console.error('Error updating report:', err);
-            res.status(500).json({ error: 'Failed to update report' });
+            res.status(500).json({ error: 'Failed to update report status' });
         }
     },
     getReportsByUser: async (req, res) => {

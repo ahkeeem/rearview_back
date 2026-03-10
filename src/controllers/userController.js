@@ -18,16 +18,17 @@ const userController = {
     // Create a new user
     createUser: async (req, res) => {
         try {
-            const { name, email, password } = req.body; // Assuming you're using only name, email, password for registration
+            console.log('Registration payload:', req.body);
+            const { name, email, password } = req.body;
 
             // Validate required fields
             if (!name || !email || !password) {
-                console.error("Missing required fields:", { name, email, password });
+                console.error('Missing required fields:', { name, email, password });
                 return res.status(400).json({ error: 'Name, email, and password are required.' });
             }
 
             // Hash the password before saving it
-            const hashedPassword = await bcrypt.hash(password, 10); // Hash password
+            const hashedPassword = await bcrypt.hash(password, 10);
 
             // SQL query to insert the new user into the database
             const query = 'INSERT INTO users (name, email, password) VALUES (?, ?, ?)';
@@ -35,16 +36,26 @@ const userController = {
 
             // Check if insertion was successful
             if (result.affectedRows > 0) {
-                res.status(201).json({
+                return res.status(201).json({
                     message: 'User created successfully',
                     userId: result.insertId
                 });
-            } else {
-                res.status(500).json({ error: 'An error occurred while creating the user. Please try again later.' });
             }
-        } catch (err) {
-            console.error("Error during user creation:", err.message);
-            res.status(500).json({ error: 'An error occurred while creating the user. Please try again later.' });
+
+            console.error('User creation failed, no rows affected');
+            return res.status(500).json({ error: 'User creation failed' });
+        } catch (error) {
+            console.error('User creation error:', error);
+
+            // Handle duplicate email error
+            if (error.code === 'ER_DUP_ENTRY' || (error.message && error.message.includes('Duplicate entry'))) {
+                return res.status(409).json({ error: 'Email already exists. Please use a different email.' });
+            }
+
+            return res.status(500).json({
+                error: 'User creation failed',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            });
         }
     },
     loginUser: async (req, res) => {
@@ -64,7 +75,7 @@ const userController = {
 
                     // Generate token and create session
                     const token = jwt.sign(
-                        { id: user.id },  // Make sure 'id' is included
+                        { userId: user.id, name: user.name, email: user.email },
                         process.env.JWT_SECRET,
                         { expiresIn: '24h' }
                     );
@@ -95,13 +106,18 @@ const userController = {
     logout: async (req, res) => {
         try {
             const token = req.headers['authorization']?.split(' ')[1];
+            const userId = req.user.userId || req.user.id;
             
+            if (token) {
             await pool.execute('DELETE FROM user_sessions WHERE token = ?', [token]);
+            }
             
+            if (userId) {
             await pool.execute(
                 'INSERT INTO activity_logs (user_id, action_type, ip_address) VALUES (?, ?, ?)',
-                [req.user.id, 'LOGOUT', req.ip]
+                    [userId, 'LOGOUT', req.ip]
             );
+            }
 
             res.json({ message: 'Logged out successfully' });
         } catch (err) {
@@ -218,11 +234,15 @@ const userController = {
     },
     submitVerification: async (req, res) => {
         try {
-            const userId = req.user.id;
+            const userId = req.user.userId || req.user.id;
             const { document_url } = req.body;
             
+            if (!document_url) {
+                return res.status(400).json({ error: 'Document URL is required' });
+            }
+            
             const [result] = await pool.execute(
-                'INSERT INTO verifications (user_id, document_url) VALUES (?, ?)',
+                'INSERT INTO verifications (user_id, document_url, status) VALUES (?, ?, "pending")',
                 [userId, document_url]
             );
 
@@ -238,7 +258,7 @@ const userController = {
 
     getVerificationStatus: async (req, res) => {
         try {
-            const userId = req.user.id;
+            const userId = req.user.userId || req.user.id;
             
             const [verifications] = await pool.execute(
                 'SELECT status, created_at FROM verifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
@@ -249,33 +269,6 @@ const userController = {
         } catch (err) {
             console.error('Error fetching verification status:', err);
             res.status(500).json({ error: 'Failed to fetch verification status' });
-        }
-    },
-
-    reviewVerification: async (req, res) => {
-        try {
-            const { verificationId } = req.params;
-            const { status } = req.body;
-            const adminId = req.user.id;
-    
-            const [result] = await pool.execute(
-                `UPDATE verifications 
-                 SET status = ?, reviewed_by = ? 
-                 WHERE id = ?`,
-                [status, adminId, verificationId]
-            );
-    
-            if (status === 'approved') {
-                await pool.execute(
-                    'UPDATE users SET is_verified = TRUE WHERE id = (SELECT user_id FROM verifications WHERE id = ?)',
-                    [verificationId]
-                );
-            }
-    
-            res.json({ message: 'Verification reviewed successfully' });
-        } catch (err) {
-            console.error('Error reviewing verification:', err);
-            res.status(500).json({ error: 'Failed to review verification' });
         }
     },
     
@@ -293,26 +286,6 @@ const userController = {
         } catch (err) {
             console.error('Error fetching pending verifications:', err);
             res.status(500).json({ error: 'Failed to fetch verifications' });
-        }
-    },
-
-    reviewVerification: async (req, res) => {
-        try {
-            const { verificationId } = req.params;
-            const { status } = req.body;
-            const adminId = req.admin.id; // Changed from req.user.id to req.admin.id
-
-            const [result] = await pool.execute(
-                `UPDATE verifications 
-                 SET status = ? 
-                 WHERE id = ?`,
-                [status, verificationId]
-            );
-
-            res.json({ message: 'Verification reviewed successfully' });
-        } catch (err) {
-            console.error('Error reviewing verification:', err);
-            res.status(500).json({ error: 'Failed to review verification' });
         }
     }
 };

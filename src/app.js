@@ -1,6 +1,10 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const { securityHeaders, corsOptions } = require('./middlewares/security');
+const { apiLimiter } = require('./middlewares/rateLimiter');
+const logger = require('./utils/logger');
 const userRoutes = require('./routes/userRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
 const trustRoutes = require('./routes/trustRoutes');
@@ -14,16 +18,27 @@ const messageRoutes = require('./routes/messageRoutes');
 
 const app = express();
 
-// Middleware
-app.use(cors({
-    origin: [        'http://localhost:3000',
-        'http://192.168.0.102:3000'
-    ],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
+// Security middleware
+app.use(securityHeaders);
+
+// CORS configuration
+app.use(cors(corsOptions));
+
+// Body parser
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// Request logging
+app.use(logger.requestLogger);
+
+// Temporary low-level request logger for deployment debugging
+app.use((req, res, next) => {
+    console.log(`[REQUEST] ${req.method} ${req.originalUrl}`);
+    next();
+});
+
+// Rate limiting
+app.use('/api/', apiLimiter);
 
 
 
@@ -59,10 +74,40 @@ app.get('/', (req, res) => {
     });
 });
 
+// Health check route for Render
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok' });
+});
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: 'Route not found',
+        path: req.originalUrl
+    });
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ error: 'Something went wrong. Please try again later.' });
+    logger.error('Unhandled error', {
+        error: err.message,
+        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+        url: req.originalUrl,
+        method: req.method,
+        ip: req.ip
+    });
+
+    // Don't leak error details in production
+    const message = process.env.NODE_ENV === 'production' 
+        ? 'Something went wrong. Please try again later.'
+        : err.message;
+
+    res.status(err.status || 500).json({
+        success: false,
+        message,
+        ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    });
 });
 
 module.exports = app;

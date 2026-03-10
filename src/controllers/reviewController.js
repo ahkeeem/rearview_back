@@ -3,18 +3,22 @@ const reviewController = {
     // Create Review
     createReview: async (req, res) => {
         try {
-            const { reviewer_id, reviewee_id, rating, comment } = req.body;
+            const { reviewee_id, rating, comment } = req.body;
+            const reviewer_id = req.user.userId || req.user.id;
 
             // Validate input
-            if (!reviewer_id || !reviewee_id || !rating) {
-                return res.status(400).json({ error: 'Reviewer ID, reviewee ID, and rating are required.' });
+            if (!reviewee_id || !rating) {
+                return res.status(400).json({ error: 'Reviewee ID and rating are required.' });
             }
             if (rating < 1 || rating > 5) {
                 return res.status(400).json({ error: 'Rating must be between 1 and 5.' });
             }
+            if (reviewer_id === reviewee_id) {
+                return res.status(400).json({ error: 'Cannot review yourself.' });
+            }
 
             const query = 'INSERT INTO reviews (reviewer_id, reviewee_id, rating, comment) VALUES (?, ?, ?, ?)';
-            const [result] = await pool.execute(query, [reviewer_id, reviewee_id, rating, comment]);
+            const [result] = await pool.execute(query, [reviewer_id, reviewee_id, rating, comment || null]);
 
             res.status(201).json({
                 message: 'Review created successfully',
@@ -86,6 +90,44 @@ const reviewController = {
         } catch (err) {
             console.error('Error fetching reviews:', err);
             res.status(500).json({ error: 'Failed to fetch reviews' });
+        }
+    },
+
+    // Get reviews received by the authenticated user
+    getReceivedReviews: async (req, res) => {
+        try {
+            const userId = req.user.userId || req.user.id;
+            const [reviews] = await pool.execute(
+                `SELECT r.*, u.name as reviewer_name, u.email as reviewer_email
+                 FROM reviews r 
+                 JOIN users u ON r.reviewer_id = u.id 
+                 WHERE r.reviewee_id = ?
+                 ORDER BY r.created_at DESC`,
+                [userId]
+            );
+            res.json(reviews);
+        } catch (err) {
+            console.error('Error fetching received reviews:', err);
+            res.status(500).json({ error: 'Failed to fetch received reviews' });
+        }
+    },
+
+    // Get reviews given by the authenticated user
+    getGivenReviews: async (req, res) => {
+        try {
+            const userId = req.user.userId || req.user.id;
+            const [reviews] = await pool.execute(
+                `SELECT r.*, u.name as reviewee_name, u.email as reviewee_email
+                 FROM reviews r 
+                 JOIN users u ON r.reviewee_id = u.id 
+                 WHERE r.reviewer_id = ?
+                 ORDER BY r.created_at DESC`,
+                [userId]
+            );
+            res.json(reviews);
+        } catch (err) {
+            console.error('Error fetching given reviews:', err);
+            res.status(500).json({ error: 'Failed to fetch given reviews' });
         }
     },
 
