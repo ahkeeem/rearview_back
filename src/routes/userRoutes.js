@@ -15,11 +15,10 @@ router.get('/search', verifyToken, userController.searchUsers);
 router.get('/:userId/stats', verifyToken, userController.getUserStats);
 router.get('/profile/:id', verifyToken, userController.getUserProfile);
 router.put('/profile/:id', verifyToken, validateProfileUpdate, userController.updateProfile);
+router.delete('/profile/:id', verifyToken, userController.deleteAccount);
 router.post('/verify', verifyToken, userController.submitVerification);
 router.get('/verify/status', verifyToken, userController.getVerificationStatus);
 
-
 module.exports = router;
-
 
 

@@ -232,6 +232,60 @@ const userController = {
             res.status(500).json({ error: 'Failed to update profile' });
         }
     },
+
+    deleteAccount: async (req, res) => {
+        const connection = await pool.getConnection();
+        try {
+            const { id } = req.params;
+            const userId = req.user.userId || req.user.id;
+            
+            // Authorization Check
+            if (parseInt(id) !== parseInt(userId)) {
+                return res.status(403).json({ error: 'Unauthorized to delete this account.' });
+            }
+
+            await connection.beginTransaction();
+
+            // 1. Delete messages authored by user
+            await connection.execute('DELETE FROM messages WHERE sender_id = ?', [userId]);
+
+            // 2. Remove user from conversation participants
+            await connection.execute('DELETE FROM conversation_participants WHERE user_id = ?', [userId]);
+
+            // 3. Delete connections where user is involved
+            await connection.execute('DELETE FROM connections WHERE user_id = ? OR connected_user_id = ?', [userId, userId]);
+
+            // 4. Delete verifications
+            await connection.execute('DELETE FROM verifications WHERE user_id = ?', [userId]);
+
+            // 5. Delete activity logs
+            await connection.execute('DELETE FROM activity_logs WHERE user_id = ?', [userId]);
+
+            // 6. Delete reviews given/received
+            await connection.execute('DELETE FROM reviews WHERE reviewer_id = ? OR reviewee_id = ?', [userId, userId]);
+
+            // 7. Delete user sessions
+            await connection.execute('DELETE FROM user_sessions WHERE user_id = ?', [userId]);
+
+            // 8. Delete the user
+            const [result] = await connection.execute('DELETE FROM users WHERE id = ?', [userId]);
+
+            if (result.affectedRows === 0) {
+                await connection.rollback();
+                return res.status(404).json({ error: 'User not found' });
+            }
+
+            await connection.commit();
+            res.status(200).json({ message: 'Account deleted successfully' });
+        } catch (err) {
+            await connection.rollback();
+            console.error('Error deleting account:', err);
+            res.status(500).json({ error: 'An error occurred during account deletion' });
+        } finally {
+            connection.release();
+        }
+    },
+
     submitVerification: async (req, res) => {
         try {
             const userId = req.user.userId || req.user.id;
