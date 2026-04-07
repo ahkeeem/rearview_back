@@ -45,18 +45,27 @@ const trustController = {
             
             // 2. Verification Score
             const [userRows] = await pool.execute(
-                'SELECT verification_level, trust_score as old_score FROM users WHERE id = ?',
+                'SELECT verification_level, trust_score as old_score, nin_verified, bvn_verified FROM users WHERE id = ?',
                 [userId]
             );
             
-            const myVLevel = userRows[0]?.verification_level || 'none';
-            const oldScore = userRows[0]?.old_score || 0;
-            const verificationScoreMap = { 'none': 0, 'phone': 50, 'advanced': 100 };
-            const verificationScore = verificationScoreMap[myVLevel];
+            const user = userRows[0] || {};
+            const myVLevel = user.verification_level || 'none';
+            const oldScore = user.old_score || 0;
+            
+            const verificationScoreMap = { 'none': 0, 'phone': 50, 'advanced': 50 }; // Base scores
+            let verificationScore = verificationScoreMap[myVLevel] || 0;
+            
+            // Identity Bonuses (High-Tier Registry)
+            if (user.nin_verified) verificationScore += 25;
+            if (user.bvn_verified) verificationScore += 25;
+            
+            // Cap at 100
+            verificationScore = Math.min(100, verificationScore);
             
             // 3. Proximity Score (Connections)
             const [connections] = await pool.execute(
-                'SELECT COUNT(*) as connection_count FROM connections WHERE user_id = ? OR connected_user_id = ?',
+                'SELECT COUNT(*) as connection_count FROM connections WHERE (user_id = ? OR connected_user_id = ?) AND status = "accepted"',
                 [userId, userId]
             );
             const connectionScore = Math.min((connections[0].connection_count * 10), 100);

@@ -1,49 +1,64 @@
 const pool = require('../config/database');
 
 const verificationController = {
-    submitVerification: async (req, res) => {
+    // Simulated NIN Verification (NIMC Mock)
+    verifyNIN: async (req, res) => {
         try {
-            // Use authenticated user ID, not from request body (security fix)
             const userId = req.user.userId || req.user.id;
-            const { document_url } = req.body;
-            
-            if (!document_url) {
-                return res.status(400).json({ error: 'Document URL is required' });
+            const { nin } = req.body;
+
+            if (!nin || nin.length !== 11) {
+                return res.status(400).json({ error: 'Please provide a valid 11-digit NIN.' });
             }
-            
-            const [result] = await pool.execute(
-                'INSERT INTO verifications (user_id, document_url, status) VALUES (?, ?, "pending")',
-                [userId, document_url]
+
+            // [MOCK] Simulation logic: 00000000000 fails, others succeed
+            if (nin === '00000000000') {
+              return res.status(422).json({ error: 'NIN could not be verified with NIMC.' });
+            }
+
+            // Update user status
+            await pool.execute(
+                "UPDATE users SET nin_verified = TRUE, verification_level = 'advanced' WHERE id = ?",
+                [userId]
             );
-            
-            res.status(201).json({
-                message: 'Verification submitted successfully',
-                verificationId: result.insertId
-            });
+
+            // Log activity
+            await pool.execute(
+                'INSERT INTO activity_logs (user_id, action_type, metadata) VALUES (?, ?, ?)',
+                [userId, 'IDENTITY_VERIFIED', JSON.stringify({ type: 'NIN' })]
+            );
+
+            res.json({ message: 'NIN Verified Successfully. Identity status upgraded.' });
         } catch (err) {
-            console.error('Error submitting verification:', err);
-            res.status(500).json({ error: 'Failed to submit verification' });
+            console.error('NIN Verification Error:', err);
+            res.status(500).json({ error: 'Failed to complete NIN verification.' });
         }
     },
 
-    getVerificationStatus: async (req, res) => {
+    // Simulated BVN Verification (NIBSS Mock)
+    verifyBVN: async (req, res) => {
         try {
-            // Use authenticated user ID or from params
-            const userId = req.user?.userId || req.user?.id || req.params.userId;
-            
-            if (!userId) {
-                return res.status(400).json({ error: 'User ID is required' });
+            const userId = req.user.userId || req.user.id;
+            const { bvn } = req.body;
+
+            if (!bvn || bvn.length !== 11) {
+                return res.status(400).json({ error: 'Please provide a valid 11-digit BVN.' });
             }
-            
-            const [verifications] = await pool.execute(
-                'SELECT status, document_url, created_at FROM verifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+
+            // [MOCK] Simulation logic
+            if (bvn === '99999999999') {
+              return res.status(422).json({ error: 'BVN mismatch with bank records.' });
+            }
+
+            await pool.execute(
+                "UPDATE users SET bvn_verified = TRUE, verification_level = 'advanced' WHERE id = ?",
                 [userId]
             );
-            
-            res.json(verifications[0] || { status: 'none' });
+
+            res.json({ message: 'BVN Verified Successfully.' });
         } catch (err) {
-            console.error('Error fetching verification status:', err);
-            res.status(500).json({ error: 'Failed to fetch verification status' });
+            console.error('BVN Verification Error:', err);
+            res.status(500).json({ error: 'Failed to complete BVN verification.' });
         }
     }
 };

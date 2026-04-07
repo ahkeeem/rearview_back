@@ -63,21 +63,19 @@ const userController = {
     // Create a new user
     createUser: async (req, res) => {
         try {
-            console.log('Registration payload:', req.body);
-            const { name, email, password } = req.body;
+            const { name, email, password, phone } = req.body;
 
             // Validate required fields
-            if (!name || !email || !password) {
-                console.error('Missing required fields:', { name, email, password });
-                return res.status(400).json({ error: 'Name, email, and password are required.' });
+            if (!name || !email || !password || !phone) {
+                return res.status(400).json({ error: 'Name, email, password, and phone number are required.' });
             }
 
             // Hash the password before saving it
             const hashedPassword = await bcrypt.hash(password, 10);
 
             // SQL query to insert the new user into the database
-            const query = 'INSERT INTO users (name, email, password) VALUES (?, ?, ?)';
-            const [result] = await pool.execute(query, [name, email, hashedPassword]);
+            const query = 'INSERT INTO users (name, email, password, phone) VALUES (?, ?, ?, ?)';
+            const [result] = await pool.execute(query, [name, email, hashedPassword, phone]);
 
             // Check if insertion was successful
             if (result.affectedRows > 0) {
@@ -87,7 +85,7 @@ const userController = {
                 const crypto = require('crypto');
                 const uuid = crypto.randomUUID();
                 
-                await pool.execute("INSERT INTO entities (id, type, name) VALUES (?, 'user', ?)", [uuid, name]);
+                await pool.execute("INSERT INTO entities (id, type, name, phone) VALUES (?, 'user', ?, ?)", [uuid, name, phone]);
                 await pool.execute("UPDATE users SET entity_id = ? WHERE id = ?", [uuid, userId]);
 
                 return res.status(201).json({
@@ -97,14 +95,17 @@ const userController = {
                 });
             }
 
-            console.error('User creation failed, no rows affected');
             return res.status(500).json({ error: 'User creation failed' });
         } catch (error) {
             console.error('User creation error:', error);
 
-            // Handle duplicate email error
-            if (error.code === 'ER_DUP_ENTRY' || (error.message && error.message.includes('Duplicate entry'))) {
-                return res.status(409).json({ error: 'Email already exists. Please use a different email.' });
+            if (error.code === 'ER_DUP_ENTRY') {
+                if (error.sqlMessage.includes('email')) {
+                    return res.status(409).json({ error: 'Email already exists. Please use a different email.' });
+                }
+                if (error.sqlMessage.includes('phone')) {
+                    return res.status(409).json({ error: 'Phone number is already associated with another account.' });
+                }
             }
 
             return res.status(500).json({
@@ -117,44 +118,98 @@ const userController = {
         try {
             const { email, password } = req.body;
             
+            // 1. Audit login attempt
+            await pool.execute(
+                'INSERT INTO login_attempts (ip_address, email) VALUES (?, ?)',
+                [req.ip, email]
+            );
+
             const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
             if (rows.length === 0) {
-                return res.status(400).json({ error: 'Email not found' });
+                return res.status(401).json({ error: 'Identity not recognized' });
             }
 
             const user = rows[0];
             const isMatch = await bcrypt.compare(password, user.password);
             if (!isMatch) {
-                return res.status(400).json({ error: 'Incorrect password' });
+                return res.status(401).json({ error: 'Identity not recognized' });
             }
 
-                    // Generate token and create session
-                    const token = jwt.sign(
-                        { userId: user.id, name: user.name, email: user.email },
-                        process.env.JWT_SECRET,
-                        { expiresIn: '24h' }
-                    );
-                    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+            // 2. Generate 6-digit OTP
+            const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+            const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+            await pool.execute(
+                'INSERT INTO otp_codes (user_id, code, type, expires_at) VALUES (?, ?, "login", ?)',
+                [user.id, otpCode, expiresAt]
+            );
+
+            // [SIMULATED OTP DELIVERY]
+            console.log(`\n--- [SIMULATED SMS/EMAIL OTP] ---\nTO: ${user.name} (${user.email})\nCODE: ${otpCode}\n-----------------------------------\n`);
+
+            res.status(200).json({
+                message: 'Verification code sent',
+                pending_verification: true,
+                email: user.email,
+                userId: user.id
+            });
+        } catch (err) {
+            console.error('Error during login:', err.message);
+            res.status(500).json({ error: 'Security subsystem failure' });
+        }
+    },
+
+    confirmOTP: async (req, res) => {
+        try {
+            const { userId, code } = req.body;
             
-                    await pool.execute(
-                        'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
-                        [user.id, token, expiresAt]
-                    );
+            if (!userId || !code) {
+                return res.status(400).json({ error: 'Incomplete verification payload' });
+            }
+
+            const [rows] = await pool.execute(
+                'SELECT * FROM otp_codes WHERE user_id = ? AND code = ? AND type = "login" AND expires_at > ? ORDER BY created_at DESC LIMIT 1',
+                [userId, code, new Date()]
+            );
+
+            if (rows.length === 0) {
+                return res.status(401).json({ error: 'Invalid or expired verification code' });
+            }
+
+            // Code is valid, fetch full user to issue token
+            const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ?', [userId]);
+            const user = userRows[0];
+
+            // Generate token and create session
+            const token = jwt.sign(
+                { userId: user.id, name: user.name, email: user.email },
+                process.env.JWT_SECRET,
+                { expiresIn: '24h' }
+            );
+            const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    
+            await pool.execute(
+                'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
+                [user.id, token, expiresAt]
+            );
 
             // Log activity
             await pool.execute(
                 'INSERT INTO activity_logs (user_id, action_type, ip_address) VALUES (?, ?, ?)',
-                [user.id, 'LOGIN', req.ip]
+                [user.id, 'LOGIN_VERIFIED', req.ip]
             );
 
+            // Cleanup code
+            await pool.execute('DELETE FROM otp_codes WHERE id = ?', [rows[0].id]);
+
             res.status(200).json({
-                message: 'Login successful',
+                message: 'Verification successful',
                 token,
                 user: { id: user.id, name: user.name, email: user.email }
             });
         } catch (err) {
-            console.error('Error during login:', err.message);
-            res.status(500).json({ error: 'An error occurred during login' });
+            console.error('OTP confirmation error:', err.message);
+            res.status(500).json({ error: 'Verification subsystem failure' });
         }
     },
 
@@ -368,9 +423,12 @@ const userController = {
             await connection.execute('DELETE FROM connections WHERE user_id = ? OR connected_user_id = ?', [userId, userId]);
 
             // 3. Mark User as pending_deletion with a 30 day grace window
+            const deletionDate = new Date();
+            deletionDate.setDate(deletionDate.getDate() + 30);
+            
             const [result] = await connection.execute(
-                "UPDATE users SET status = 'pending_deletion', deletion_scheduled_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 30 DAY), email = CONCAT(id, '_deleted@local'), photo_url = NULL WHERE id = ?",
-                [userId]
+                "UPDATE users SET status = 'pending_deletion', deletion_scheduled_at = ?, email = CONCAT(id, '_deleted@local'), photo_url = NULL WHERE id = ?",
+                [deletionDate, userId]
             );
 
             if (result.affectedRows === 0) {
