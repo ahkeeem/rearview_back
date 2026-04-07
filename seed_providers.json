@@ -1,0 +1,42 @@
+[
+  {
+    "id": "prov_001",
+    "name": "Lagos Elite Plumbers",
+    "area": "Lekki Phase 1",
+    "category": "Plumbing",
+    "phone": "+2348012345678",
+    "whatsapp_link": "https://wa.me/2348012345678",
+    "rating": 4.8,
+    "is_verified": true
+  },
+  {
+    "id": "prov_002",
+    "name": "Yaba Tech Solutions",
+    "area": "Yaba",
+    "category": "Electronics Repair",
+    "phone": "+2349087654321",
+    "whatsapp_link": "https://wa.me/2349087654321",
+    "rating": 4.2,
+    "is_verified": true
+  },
+  {
+    "id": "prov_003",
+    "name": "Surulere Home Cleaning",
+    "area": "Surulere",
+    "category": "Cleaning",
+    "phone": "+2347011223344",
+    "whatsapp_link": "https://wa.me/2347011223344",
+    "rating": 3.9,
+    "is_verified": false
+  },
+  {
+    "id": "prov_004",
+    "name": "Ikeja Solar Installs",
+    "area": "Ikeja",
+    "category": "Electrical",
+    "phone": "+2348122334455",
+    "whatsapp_link": "https://wa.me/2348122334455",
+    "rating": 4.9,
+    "is_verified": true
+  }
+]

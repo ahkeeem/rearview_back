@@ -18,6 +18,8 @@ const messageRoutes = require('./routes/messageRoutes');
 const activityRoutes = require('./routes/activityRoutes');
 const entityRoutes = require('./routes/entityRoutes');
 const threadRoutes = require('./routes/threadRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
+const escrowRoutes = require('./routes/escrowRoutes');
 
 const app = express();
 
@@ -65,6 +67,8 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/feed', activityRoutes);
 app.use('/api/entities', entityRoutes);
 app.use('/api/threads', threadRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/escrow', escrowRoutes);
 
 // Root route with API documentation
 app.get('/', (req, res) => {

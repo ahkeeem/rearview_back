@@ -155,7 +155,9 @@ const userController = {
                 message: 'Verification code sent',
                 pending_verification: true,
                 email: user.email,
-                userId: user.id
+                userId: user.id,
+                // DEV ONLY: include code so it's visible on-screen
+                ...(process.env.NODE_ENV !== 'production' && { dev_otp: otpCode })
             });
         } catch (err) {
             console.error('Error during login:', err.message);

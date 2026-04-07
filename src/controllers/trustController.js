@@ -70,9 +70,29 @@ const trustController = {
             );
             const connectionScore = Math.min((connections[0].connection_count * 10), 100);
             
+            // 4. Financial Reliability (Escrow)
+            const [escrows] = await pool.execute(
+                'SELECT status, COUNT(*) as count FROM escrow_orders WHERE buyer_id = ? OR vendor_id = ? GROUP BY status',
+                [userId, userId]
+            );
+            
+            let completedEscrows = 0;
+            let disputedEscrows = 0;
+            
+            escrows.forEach(e => {
+                if (e.status === 'released') completedEscrows = e.count;
+                if (e.status === 'disputed' || e.status === 'refunded') disputedEscrows += e.count;
+            });
+            
+            // Baseline 50, +5 per completed, -15 per disputed
+            let escrowScore = 50 + (completedEscrows * 5) - (disputedEscrows * 15);
+            escrowScore = Math.max(0, Math.min(100, escrowScore));
+            
             // Final Trust Score Calculation (0-100)
+            // Adjust weights: Reviews 45%, Escrow 15%, Verification 25%, Proximity (Connections) 15%
             const trustScore = (
-                (weightedReviewScore * 20 * 0.6) + 
+                (weightedReviewScore * 20 * 0.45) + 
+                (escrowScore * 0.15) +
                 (verificationScore * 0.25) + 
                 (connectionScore * 0.15)
             );
@@ -90,8 +110,10 @@ const trustController = {
                     weightedReviewScore: Number(weightedReviewScore.toFixed(2)),
                     verificationLevel: myVLevel,
                     connectionCount: connections[0].connection_count,
+                    escrowCompletions: completedEscrows,
                     breakdown: {
-                        reviews: Math.round(weightedReviewScore * 20 * 0.6),
+                        reviews: Math.round(weightedReviewScore * 20 * 0.45),
+                        financial: Math.round(escrowScore * 0.15),
                         verification: Math.round(verificationScore * 0.25),
                         proximity: Math.round(connectionScore * 0.15)
                     }
