@@ -65,17 +65,20 @@ const userController = {
         try {
             const { name, email, password, phone } = req.body;
 
-            // Validate required fields
-            if (!name || !email || !password || !phone) {
-                return res.status(400).json({ error: 'Name, email, password, and phone number are required.' });
+            // Validate required fields — phone is optional at signup
+            if (!name || !email || !password) {
+                return res.status(400).json({ error: 'Name, email, and password are required.' });
             }
 
             // Hash the password before saving it
             const hashedPassword = await bcrypt.hash(password, 10);
 
-            // SQL query to insert the new user into the database
-            const query = 'INSERT INTO users (name, email, password, phone) VALUES (?, ?, ?, ?)';
-            const [result] = await pool.execute(query, [name, email, hashedPassword, phone]);
+            // SQL query - phone is optional
+            const query = phone
+                ? 'INSERT INTO users (name, email, password, phone) VALUES (?, ?, ?, ?)'
+                : 'INSERT INTO users (name, email, password) VALUES (?, ?, ?)';
+            const params = phone ? [name, email, hashedPassword, phone] : [name, email, hashedPassword];
+            const [result] = await pool.execute(query, params);
 
             // Check if insertion was successful
             if (result.affectedRows > 0) {
@@ -85,7 +88,7 @@ const userController = {
                 const crypto = require('crypto');
                 const uuid = crypto.randomUUID();
                 
-                await pool.execute("INSERT INTO entities (id, type, name, phone) VALUES (?, 'user', ?, ?)", [uuid, name, phone]);
+                await pool.execute("INSERT INTO entities (id, type, name) VALUES (?, 'user', ?)", [uuid, name]);
                 await pool.execute("UPDATE users SET entity_id = ? WHERE id = ?", [uuid, userId]);
 
                 return res.status(201).json({
@@ -100,12 +103,13 @@ const userController = {
             console.error('User creation error:', error);
 
             if (error.code === 'ER_DUP_ENTRY') {
-                if (error.sqlMessage.includes('email')) {
+                if (error.sqlMessage && error.sqlMessage.includes('email')) {
                     return res.status(409).json({ error: 'Email already exists. Please use a different email.' });
                 }
-                if (error.sqlMessage.includes('phone')) {
+                if (error.sqlMessage && error.sqlMessage.includes('phone')) {
                     return res.status(409).json({ error: 'Phone number is already associated with another account.' });
                 }
+                return res.status(409).json({ error: 'An account with these details already exists.' });
             }
 
             return res.status(500).json({
@@ -344,7 +348,7 @@ const userController = {
         try {
             const { id } = req.params;
             const [user] = await pool.execute(
-                'SELECT id, name, email, bio, headline, location, photo_url, banner_url, phone, website, entity_id, status FROM users WHERE id = ?',
+                'SELECT id, name, email, bio, headline, location, photo_url, banner_url, phone, website, entity_id, status, verification_level, nin_verified, bvn_verified, email_verified, phone_verified FROM users WHERE id = ?',
                 [id]
             );
             
@@ -502,10 +506,206 @@ const userController = {
             console.error('Error fetching pending verifications:', err);
             res.status(500).json({ error: 'Failed to fetch verifications' });
         }
+    },
+
+    // Forgot Password — send reset OTP
+    forgotPassword: async (req, res) => {
+        try {
+            const { email } = req.body;
+            if (!email) return res.status(400).json({ error: 'Email is required' });
+
+            const [users] = await pool.execute('SELECT id, name FROM users WHERE email = ?', [email]);
+            if (users.length === 0) {
+                return res.json({ message: 'If an account exists with that email, a reset code has been sent.' });
+            }
+
+            const user = users[0];
+            const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+            const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+            await pool.execute(
+                'INSERT INTO otp_codes (user_id, code, type, expires_at) VALUES (?, ?, "verify", ?)',
+                [user.id, otpCode, expiresAt]
+            );
+
+            console.log(`\n--- [PASSWORD RESET OTP] ---\nTO: ${user.name} (${email})\nCODE: ${otpCode}\n---------------------------\n`);
+
+            res.json({ message: 'If an account exists with that email, a reset code has been sent.' });
+        } catch (err) {
+            console.error('Forgot password error:', err);
+            res.status(500).json({ error: 'Failed to process request' });
+        }
+    },
+
+    // Reset Password — verify OTP and set new password
+    resetPassword: async (req, res) => {
+        try {
+            const { email, code, newPassword } = req.body;
+            if (!email || !code || !newPassword) {
+                return res.status(400).json({ error: 'Email, code, and new password are required' });
+            }
+
+            const [users] = await pool.execute('SELECT id FROM users WHERE email = ?', [email]);
+            if (users.length === 0) {
+                return res.status(400).json({ error: 'Invalid reset request' });
+            }
+
+            const userId = users[0].id;
+            const [codes] = await pool.execute(
+                'SELECT * FROM otp_codes WHERE user_id = ? AND code = ? AND type = "verify" AND expires_at > ? ORDER BY created_at DESC LIMIT 1',
+                [userId, code, new Date()]
+            );
+
+            if (codes.length === 0) {
+                return res.status(401).json({ error: 'Invalid or expired reset code' });
+            }
+
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+            await pool.execute('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, userId]);
+            await pool.execute('DELETE FROM otp_codes WHERE id = ?', [codes[0].id]);
+            await pool.execute('DELETE FROM user_sessions WHERE user_id = ?', [userId]);
+
+            res.json({ message: 'Password reset successful. Please login with your new password.' });
+        } catch (err) {
+            console.error('Reset password error:', err);
+            res.status(500).json({ error: 'Failed to reset password' });
+        }
+    },
+
+    // POST /logout 
+    logoutUser: async (req, res) => {
+        try {
+            const token = req.headers['authorization']?.split(' ')[1];
+            const userId = req.user.userId || req.user.id;
+            
+            if (token) {
+                await pool.execute('DELETE FROM user_sessions WHERE token = ?', [token]);
+            }
+            if (userId) {
+                await pool.execute(
+                    'INSERT INTO activity_logs (user_id, action_type, ip_address) VALUES (?, ?, ?)',
+                    [userId, 'LOGOUT', req.ip]
+                );
+            }
+
+            res.json({ message: 'Logged out successfully' });
+        } catch (err) {
+            console.error('Error during logout:', err.message);
+            res.status(500).json({ error: 'An error occurred during logout' });
+        }
+    },
+
+    // Email verification — send OTP
+    sendEmailVerification: async (req, res) => {
+        try {
+            const userId = req.user.userId || req.user.id;
+            const [users] = await pool.execute('SELECT email, name FROM users WHERE id = ?', [userId]);
+            if (users.length === 0) return res.status(404).json({ error: 'User not found' });
+
+            const user = users[0];
+            const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+            const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+            await pool.execute(
+                'INSERT INTO otp_codes (user_id, code, type, expires_at) VALUES (?, ?, "verify", ?)',
+                [userId, otpCode, expiresAt]
+            );
+
+            console.log(`\n--- [EMAIL VERIFY OTP] ---\nTO: ${user.name} (${user.email})\nCODE: ${otpCode}\n-------------------------\n`);
+
+            res.json({ message: 'Verification code sent to your email.' });
+        } catch (err) {
+            console.error('Send email verification error:', err);
+            res.status(500).json({ error: 'Failed to send verification' });
+        }
+    },
+
+    // Email verification — confirm
+    confirmEmailVerification: async (req, res) => {
+        try {
+            const userId = req.user.userId || req.user.id;
+            const { code } = req.body;
+
+            const [codes] = await pool.execute(
+                'SELECT * FROM otp_codes WHERE user_id = ? AND code = ? AND type = "verify" AND expires_at > ? ORDER BY created_at DESC LIMIT 1',
+                [userId, code, new Date()]
+            );
+
+            if (codes.length === 0) {
+                return res.status(401).json({ error: 'Invalid or expired code' });
+            }
+
+            await pool.execute(
+                "UPDATE users SET email_verified = TRUE, verification_level = CASE WHEN verification_level = 'none' THEN 'phone' ELSE verification_level END WHERE id = ?",
+                [userId]
+            );
+            await pool.execute('DELETE FROM otp_codes WHERE id = ?', [codes[0].id]);
+
+            res.json({ message: 'Email verified successfully!' });
+        } catch (err) {
+            console.error('Confirm email verification error:', err);
+            res.status(500).json({ error: 'Verification failed' });
+        }
+    },
+
+    // Phone verification — send OTP
+    sendPhoneVerification: async (req, res) => {
+        try {
+            const userId = req.user.userId || req.user.id;
+            const { phone } = req.body;
+            if (!phone) return res.status(400).json({ error: 'Phone number is required' });
+
+            const [existing] = await pool.execute('SELECT id FROM users WHERE phone = ? AND id != ?', [phone, userId]);
+            if (existing.length > 0) {
+                return res.status(409).json({ error: 'This phone number is already linked to another account.' });
+            }
+
+            await pool.execute('UPDATE users SET phone = ? WHERE id = ?', [phone, userId]);
+
+            const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+            const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+            await pool.execute(
+                'INSERT INTO otp_codes (user_id, code, type, expires_at) VALUES (?, ?, "verify", ?)',
+                [userId, otpCode, expiresAt]
+            );
+
+            console.log(`\n--- [PHONE VERIFY OTP] ---\nTO: ${phone}\nCODE: ${otpCode}\n-------------------------\n`);
+
+            res.json({ message: 'Verification code sent to your phone.' });
+        } catch (err) {
+            console.error('Send phone verification error:', err);
+            res.status(500).json({ error: 'Failed to send verification' });
+        }
+    },
+
+    // Phone verification — confirm
+    confirmPhoneVerification: async (req, res) => {
+        try {
+            const userId = req.user.userId || req.user.id;
+            const { code } = req.body;
+
+            const [codes] = await pool.execute(
+                'SELECT * FROM otp_codes WHERE user_id = ? AND code = ? AND type = "verify" AND expires_at > ? ORDER BY created_at DESC LIMIT 1',
+                [userId, code, new Date()]
+            );
+
+            if (codes.length === 0) {
+                return res.status(401).json({ error: 'Invalid or expired code' });
+            }
+
+            await pool.execute(
+                "UPDATE users SET phone_verified = TRUE, verification_level = 'phone' WHERE id = ?",
+                [userId]
+            );
+            await pool.execute('DELETE FROM otp_codes WHERE id = ?', [codes[0].id]);
+
+            res.json({ message: 'Phone verified successfully!' });
+        } catch (err) {
+            console.error('Confirm phone verification error:', err);
+            res.status(500).json({ error: 'Verification failed' });
+        }
     }
 };
 
 module.exports = userController;
-
-
-

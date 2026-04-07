@@ -3,7 +3,8 @@ const router = express.Router();
 const verificationController = require('../controllers/verificationController');
 const { verifyToken } = require('../middlewares/authMiddleware');
 
-router.post('/submit', verifyToken, verificationController.submitVerification);
-router.get('/status/:userId', verifyToken, verificationController.getVerificationStatus);
+// NIN/BVN Identity Verification
+router.post('/nin', verifyToken, verificationController.verifyNIN);
+router.post('/bvn', verifyToken, verificationController.verifyBVN);
 
 module.exports = router;

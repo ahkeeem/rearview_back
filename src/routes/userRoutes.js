@@ -9,8 +9,11 @@ const { authLimiter } = require('../middlewares/rateLimiter');
 router.post('/', authLimiter, validateRegistration, userController.createUser);
 router.post('/login', authLimiter, validateLogin, userController.loginUser);
 router.post('/login/confirm', authLimiter, userController.confirmOTP);
+router.post('/forgot-password', authLimiter, userController.forgotPassword);
+router.post('/reset-password', authLimiter, userController.resetPassword);
 
 // Protected routes - require authentication
+router.post('/logout', verifyToken, userController.logoutUser);
 router.get('/', verifyToken, userController.getUsers);
 router.get('/search', verifyToken, userController.searchUsers);
 router.get('/:userId/stats', verifyToken, userController.getUserStats);
@@ -21,6 +24,10 @@ router.delete('/profile/:id', verifyToken, userController.deleteAccount);
 router.post('/verify', verifyToken, userController.submitVerification);
 router.get('/verify/status', verifyToken, userController.getVerificationStatus);
 
+// Verification routes
+router.post('/verify/send-email', verifyToken, userController.sendEmailVerification);
+router.post('/verify/confirm-email', verifyToken, userController.confirmEmailVerification);
+router.post('/verify/send-phone', verifyToken, userController.sendPhoneVerification);
+router.post('/verify/confirm-phone', verifyToken, userController.confirmPhoneVerification);
+
 module.exports = router;
-
-
