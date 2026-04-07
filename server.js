@@ -2,6 +2,10 @@ const socketIo = require('socket.io');
 const messageHandler = require('./src/websocket/messageHandler');
 const http = require('http');
 const app = require('./src/app');
+const initializeDeletionJob = require('./src/jobs/deletionJob');
+
+// Boot background processes
+initializeDeletionJob();
 
 // Create HTTP server
 const server = http.createServer(app);

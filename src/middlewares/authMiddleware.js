@@ -11,26 +11,37 @@ const verifyToken = async (req, res, next) => {
         }
         
         const decoded = jwt.verify(token, JWT_SECRET);
-        
-        // Set the user object with the userId from token
         req.user = {
             userId: decoded.userId,
-            id: decoded.userId, // Support both for backward compatibility
+            id: decoded.userId,
             name: decoded.name,
             email: decoded.email
         };
-        
         next();
     } catch (err) {
-        if (err.name === 'TokenExpiredError') {
-            return res.status(401).json({ error: 'Token expired' });
-        }
-        if (err.name === 'JsonWebTokenError') {
-            return res.status(401).json({ error: 'Invalid token' });
-        }
-        console.error('Authentication error:', err.message);
+        if (err.name === 'TokenExpiredError') return res.status(401).json({ error: 'Token expired' });
+        if (err.name === 'JsonWebTokenError') return res.status(401).json({ error: 'Invalid token' });
         res.status(401).json({ error: 'Failed to authenticate token' });
     }
 };
 
-module.exports = verifyToken;
+const optionalVerify = async (req, res, next) => {
+    try {
+        const token = req.headers['authorization']?.split(' ')[1];
+        if (!token) return next();
+        
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = {
+            userId: decoded.userId,
+            id: decoded.userId,
+            name: decoded.name,
+            email: decoded.email
+        };
+        next();
+    } catch (err) {
+        // If token is invalid or expired, we just treat them as guest
+        next();
+    }
+};
+
+module.exports = { verifyToken, optionalVerify };

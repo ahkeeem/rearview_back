@@ -55,15 +55,21 @@ const validateLogin = [
 // Review validation
 const validateReview = [
   body('reviewee_id')
+    .optional({ values: 'falsy' })
     .isInt({ min: 1 })
     .withMessage('Valid reviewee ID is required'),
+  
+  body('target_entity_id')
+    .optional({ values: 'falsy' })
+    .isUUID()
+    .withMessage('Valid Target Entity ID is required'),
   
   body('rating')
     .isInt({ min: 1, max: 5 })
     .withMessage('Rating must be between 1 and 5'),
   
   body('comment')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ max: 2000 })
     .withMessage('Comment must not exceed 2000 characters')
@@ -75,24 +81,60 @@ const validateReview = [
 // Profile update validation
 const validateProfileUpdate = [
   body('name')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ min: 2, max: 100 })
     .withMessage('Name must be between 2 and 100 characters'),
   
-  body('bio')
-    .optional()
+  body('email')
+    .optional({ values: 'falsy' })
     .trim()
-    .isLength({ max: 1000 })
-    .withMessage('Bio must not exceed 1000 characters')
-    .escape(),
+    .isEmail()
+    .withMessage('Please provide a valid email address')
+    .normalizeEmail(),
+
+  body('bio')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage('Bio must not exceed 2000 characters'),
   
+  body('headline')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 255 })
+    .withMessage('Headline must not exceed 255 characters'),
+
+  body('location')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 255 })
+    .withMessage('Location must not exceed 255 characters'),
+
   body('phone')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .matches(/^\+?[\d\s-()]+$/)
     .withMessage('Please provide a valid phone number'),
   
+  body('website')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isURL()
+    .withMessage('Please provide a valid URL for your website'),
+
+  body('photo_url')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isURL()
+    .withMessage('Please provide a valid URL for your profile photo'),
+
+  body('banner_url')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isURL()
+    .withMessage('Please provide a valid URL for your banner image'),
+
   validate
 ];
 

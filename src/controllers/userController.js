@@ -1,9 +1,54 @@
-// src/controllers/userController.js
-const bcrypt = require('bcrypt'); // bcrypt for password hashing
+const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const pool = require('../config/database'); // Assuming you're using MySQL
+const pool = require('../config/database');
+const multer = require('multer');
+const path = require('path');
+
+// Multer Storage for local uploads
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, 'uploads/');
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+    }
+});
+
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+    fileFilter: (req, file, cb) => {
+        const filetypes = /jpeg|jpg|png|webp/;
+        const mimetype = filetypes.test(file.mimetype);
+        const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+        if (mimetype && extname) {
+            return cb(null, true);
+        }
+        cb(new Error('Only images (jpeg, jpg, png, webp) are allowed!'));
+    }
+}).single('image');
 
 const userController = {
+    // Native Image Upload Handler
+    uploadImage: (req, res) => {
+        upload(req, res, (err) => {
+            if (err) {
+                return res.status(400).json({ error: err.message });
+            }
+            if (!req.file) {
+                return res.status(400).json({ error: 'Please select an image file to upload.' });
+            }
+
+            // Return full local URL for development
+            const imageUrl = `http://localhost:4000/uploads/${req.file.filename}`;
+            res.status(200).json({ 
+                message: 'Image uploaded successfully',
+                imageUrl: imageUrl 
+            });
+        });
+    },
+
     // Get all users
     getUsers: async (req, res) => {
         try {
@@ -36,9 +81,19 @@ const userController = {
 
             // Check if insertion was successful
             if (result.affectedRows > 0) {
+                const userId = result.insertId;
+                
+                // [Entity Generation Hub] Assign a generic Entity ID dynamically
+                const crypto = require('crypto');
+                const uuid = crypto.randomUUID();
+                
+                await pool.execute("INSERT INTO entities (id, type, name) VALUES (?, 'user', ?)", [uuid, name]);
+                await pool.execute("UPDATE users SET entity_id = ? WHERE id = ?", [uuid, userId]);
+
                 return res.status(201).json({
                     message: 'User created successfully',
-                    userId: result.insertId
+                    userId: userId,
+                    entityId: uuid
                 });
             }
 
@@ -129,63 +184,100 @@ const userController = {
         try {
             const userId = req.params.userId;
             
-            // Get weighted reviews with time decay
-            const [reviews] = await pool.execute(`
+            // 1. Get Weighted Reviews (Matching trustController.js logic)
+            const [weightedResults] = await pool.execute(`
                 SELECT 
                     r.*,
-                    u.name as reviewer_name,
-                    EXP(-DATEDIFF(CURRENT_TIMESTAMP, r.created_at)/365) as time_weight
-                FROM reviews r 
-                JOIN users u ON r.reviewer_id = u.id
-                WHERE r.reviewee_id = ?
+                    rv.name as reviewer_name,
+                    rv.verification_level as reviewer_v_level,
+                    rv.trust_score as reviewer_trust_score,
+                    res.content as merchant_response,
+                    e.claimed_by_user_id
+                FROM reviews r
+                JOIN users rv ON r.reviewer_id = rv.id
+                JOIN entities e ON r.target_entity_id = e.id
+                JOIN users tgt ON r.target_entity_id = tgt.entity_id
+                LEFT JOIN review_responses res ON r.id = res.review_id
+                WHERE tgt.id = ?
                 ORDER BY r.created_at DESC
             `, [userId]);
+
+            let totalWeight = 0;
+            let totalWeightedRating = 0;
+
+            const vLevelWeights = { 'none': 1.0, 'phone': 1.5, 'advanced': 2.5 };
+            const proofWeights = { 'none': 1.0, 'low': 1.2, 'high': 2.0 };
+
+            weightedResults.forEach(r => {
+                let weight = (vLevelWeights[r.reviewer_v_level] || 1.0) + (r.reviewer_trust_score / 100);
+                weight *= (proofWeights[r.proof_tier] || 1.0);
+                if (r.is_disputed) weight *= 0.5;
+                
+                totalWeightedRating += (r.rating * weight);
+                totalWeight += weight;
+            });
+
+            const weightedReviewScore = totalWeight > 0 ? (totalWeightedRating / totalWeight) : 0;
             
-            // Keep reviews in 0-5 range but scale up the final trust score
-            const weightedScore = reviews.reduce((acc, review) => 
-                acc + (review.rating * review.time_weight), 0) / 
-                (reviews.reduce((acc, review) => acc + review.time_weight, 0) || 1);
-            
-            const [verifications] = await pool.execute(
-                'SELECT COUNT(*) as verification_count FROM verifications WHERE user_id = ? AND status = "approved"',
+            // 2. Verification Score
+            const [userRows] = await pool.execute(
+                'SELECT verification_level, trust_score as old_score FROM users WHERE id = ?',
                 [userId]
             );
-
+            const myVLevel = userRows[0]?.verification_level || 'none';
+            const verificationScoreMap = { 'none': 0, 'phone': 50, 'advanced': 100 };
+            const verificationScore = verificationScoreMap[myVLevel];
+            
+            // 3. Connections
             const [connections] = await pool.execute(
                 'SELECT COUNT(*) as connection_count FROM connections WHERE (user_id = ? OR connected_user_id = ?) AND status = "accepted"',
                 [userId, userId]
             );
-
-            // Calculate final trust score on 0-100 scale
-            const finalTrustScore = (
-                (weightedScore * 0.6 * 20) +                                      // 60% weight, scaled to 100
-                (Math.min(verifications[0].verification_count, 1) * 0.25 * 100) + // 25% weight
-                (Math.min(connections[0].connection_count / 10, 1) * 0.15 * 100)  // 15% weight
+            const connectionScore = Math.min((connections[0].connection_count * 10), 100);
+            
+            const finalTrustScore = Math.round(
+                (weightedReviewScore * 20 * 0.6) + 
+                (verificationScore * 0.25) + 
+                (connectionScore * 0.15)
             );
 
             res.json({
-                trustScore: Math.round(Math.min(100, finalTrustScore)),
-                reviews: reviews.slice(0, 5),
+                trustScore: finalTrustScore,
+                reviews: weightedResults.slice(0, 5),
                 connectionCount: connections[0].connection_count,
-                verificationCount: verifications[0].verification_count,
-                reviewCount: reviews.length
+                verificationCount: myVLevel === 'none' ? 0 : (myVLevel === 'phone' ? 1 : 2),
+                reviewCount: weightedResults.length,
+                breakdown: {
+                    reviews: Math.round(weightedReviewScore * 20 * 0.6),
+                    verification: Math.round(verificationScore * 0.25),
+                    proximity: Math.round(connectionScore * 0.15)
+                }
             });
         } catch (err) {
             console.error('Error fetching user stats:', err);
             res.status(500).json({ error: 'Failed to fetch user statistics' });
         }
-    
     },    
     
     searchUsers: async (req, res) => {
         try {
             const searchTerm = req.query.q;
+            const callerId = req.user.userId || req.user.id;
+            
             const query = `
-                SELECT id, name, email 
-                FROM users 
-                WHERE name LIKE ? OR email LIKE ?
+                SELECT 
+                    u.id, 
+                    u.name, 
+                    u.email,
+                    c.status as connectionStatus
+                FROM users u
+                LEFT JOIN connections c ON 
+                    (c.user_id = u.id AND c.connected_user_id = ?) 
+                    OR 
+                    (c.connected_user_id = u.id AND c.user_id = ?)
+                WHERE (u.name LIKE ? OR u.email LIKE ?) AND u.status IN ('active', 'deactivated')
             `;
-            const [users] = await pool.execute(query, [`%${searchTerm}%`, `%${searchTerm}%`]);
+            const [users] = await pool.execute(query, [callerId, callerId, `%${searchTerm}%`, `%${searchTerm}%`]);
             res.json(users);
         } catch (err) {
             console.error('Error searching users:', err);
@@ -197,7 +289,7 @@ const userController = {
         try {
             const { id } = req.params;
             const [user] = await pool.execute(
-                'SELECT id, name, email, created_at FROM users WHERE id = ?',
+                'SELECT id, name, email, bio, headline, location, photo_url, banner_url, phone, website, entity_id, status FROM users WHERE id = ?',
                 [id]
             );
             
@@ -215,17 +307,40 @@ const userController = {
     updateProfile: async (req, res) => {
         try {
             const { id } = req.params;
-            const { name, email } = req.body;
-            
+            const { name, email, bio, headline, location, photo_url, banner_url, phone, website } = req.body;
+
+            // Build dynamic SET clause from provided fields
+            const fields = [];
+            const values = [];
+            if (name !== undefined) { fields.push('name = ?'); values.push(name); }
+            if (email !== undefined) { fields.push('email = ?'); values.push(email); }
+            if (bio !== undefined) { fields.push('bio = ?'); values.push(bio); }
+            if (headline !== undefined) { fields.push('headline = ?'); values.push(headline); }
+            if (location !== undefined) { fields.push('location = ?'); values.push(location); }
+            if (photo_url !== undefined) { fields.push('photo_url = ?'); values.push(photo_url); }
+            if (banner_url !== undefined) { fields.push('banner_url = ?'); values.push(banner_url); }
+            if (phone !== undefined) { fields.push('phone = ?'); values.push(phone); }
+            if (website !== undefined) { fields.push('website = ?'); values.push(website); }
+
+            if (fields.length === 0) {
+                return res.status(400).json({ error: 'No fields to update' });
+            }
+
+            values.push(id);
             const [result] = await pool.execute(
-                'UPDATE users SET name = ?, email = ? WHERE id = ?',
-                [name, email, id]
+                `UPDATE users SET ${fields.join(', ')} WHERE id = ?`,
+                values
             );
             
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'User not found' });
             }
             
+            // Sync entity name if name changed
+            if (name !== undefined) {
+                await pool.execute('UPDATE entities SET name = ? WHERE id = (SELECT entity_id FROM users WHERE id = ?)', [name, id]).catch(() => {});
+            }
+
             res.status(200).json({ message: 'Profile updated successfully' });
         } catch (err) {
             console.error('Error updating profile:', err.message);
@@ -246,29 +361,17 @@ const userController = {
 
             await connection.beginTransaction();
 
-            // 1. Delete messages authored by user
-            await connection.execute('DELETE FROM messages WHERE sender_id = ?', [userId]);
-
-            // 2. Remove user from conversation participants
-            await connection.execute('DELETE FROM conversation_participants WHERE user_id = ?', [userId]);
-
-            // 3. Delete connections where user is involved
-            await connection.execute('DELETE FROM connections WHERE user_id = ? OR connected_user_id = ?', [userId, userId]);
-
-            // 4. Delete verifications
-            await connection.execute('DELETE FROM verifications WHERE user_id = ?', [userId]);
-
-            // 5. Delete activity logs
-            await connection.execute('DELETE FROM activity_logs WHERE user_id = ?', [userId]);
-
-            // 6. Delete reviews given/received
-            await connection.execute('DELETE FROM reviews WHERE reviewer_id = ? OR reviewee_id = ?', [userId, userId]);
-
-            // 7. Delete user sessions
+            // 1. Delete active sessions immediately to log them out
             await connection.execute('DELETE FROM user_sessions WHERE user_id = ?', [userId]);
 
-            // 8. Delete the user
-            const [result] = await connection.execute('DELETE FROM users WHERE id = ?', [userId]);
+            // 2. Clear Active Connections immediately (so they drop off networks)
+            await connection.execute('DELETE FROM connections WHERE user_id = ? OR connected_user_id = ?', [userId, userId]);
+
+            // 3. Mark User as pending_deletion with a 30 day grace window
+            const [result] = await connection.execute(
+                "UPDATE users SET status = 'pending_deletion', deletion_scheduled_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 30 DAY), email = CONCAT(id, '_deleted@local'), photo_url = NULL WHERE id = ?",
+                [userId]
+            );
 
             if (result.affectedRows === 0) {
                 await connection.rollback();
@@ -276,11 +379,11 @@ const userController = {
             }
 
             await connection.commit();
-            res.status(200).json({ message: 'Account deleted successfully' });
+            res.status(200).json({ message: 'Account deactivated. It will be permanently deleted after 30 days.' });
         } catch (err) {
             await connection.rollback();
-            console.error('Error deleting account:', err);
-            res.status(500).json({ error: 'An error occurred during account deletion' });
+            console.error('Error initiating account deletion:', err);
+            res.status(500).json({ error: 'An error occurred during account deactivation' });
         } finally {
             connection.release();
         }

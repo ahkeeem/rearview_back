@@ -15,6 +15,9 @@ const reportRoutes = require('./routes/reportRoutes');
 const connectionRoutes = require('./routes/connectionRoutes');
 const conversationRoutes = require('./routes/conversationRoutes');
 const messageRoutes = require('./routes/messageRoutes');
+const activityRoutes = require('./routes/activityRoutes');
+const entityRoutes = require('./routes/entityRoutes');
+const threadRoutes = require('./routes/threadRoutes');
 
 const app = express();
 
@@ -45,6 +48,9 @@ app.use('/api/', apiLimiter);
 
 
 
+// Static files
+app.use('/uploads', express.static('uploads'));
+
 // Routes
 app.use('/api/users', userRoutes);
 app.use('/api/reviews', reviewRoutes);
@@ -56,6 +62,9 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/connections', connectionRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/feed', activityRoutes);
+app.use('/api/entities', entityRoutes);
+app.use('/api/threads', threadRoutes);
 
 // Root route with API documentation
 app.get('/', (req, res) => {

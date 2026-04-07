@@ -14,6 +14,21 @@ const connectionController = {
                 return res.status(400).json({ error: 'Cannot connect to yourself' });
             }
 
+            // Check for duplicate pending/accepted requests
+            const [existing] = await pool.execute(
+                `SELECT id, status FROM connections 
+                 WHERE (user_id = ? AND connected_user_id = ?) 
+                    OR (user_id = ? AND connected_user_id = ?)`,
+                [user_id, connected_user_id, connected_user_id, user_id]
+            );
+
+            if (existing.length > 0) {
+                const currentStatus = existing[0].status;
+                if (currentStatus === 'pending' || currentStatus === 'accepted') {
+                    return res.status(409).json({ error: `A connection request is already ${currentStatus} between these users` });
+                }
+            }
+
             const [result] = await pool.execute(
                 'INSERT INTO connections (user_id, connected_user_id, status) VALUES (?, ?, "pending")',
                 [user_id, connected_user_id]
@@ -72,6 +87,22 @@ const connectionController = {
 
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'Connection request not found' });
+            }
+
+            // [Hook] Dispatch to Activity Feed if accepted
+            if (status === 'accepted') {
+                try {
+                    // We need the original requester's user_id from the connection
+                    const [conn] = await pool.execute('SELECT user_id FROM connections WHERE id = ?', [id]);
+                    if (conn.length > 0) {
+                        await pool.execute(
+                            "INSERT INTO activity_feed (actor_id, action_type, target_id, action_data) VALUES (?, 'connected', ?, ?)",
+                            [userId, id, JSON.stringify({ with_user: conn[0].user_id })]
+                        );
+                    }
+                } catch (e) {
+                    console.error('Failed to log connection to feed:', e);
+                }
             }
 
             res.json({ message: 'Connection status updated successfully' });
