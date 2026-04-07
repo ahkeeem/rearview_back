@@ -3,6 +3,8 @@ const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 const multer = require('multer');
 const path = require('path');
+const emailService = require('../services/emailService');
+const smsService = require('../services/smsService');
 
 // Multer Storage for local uploads
 const storage = multer.diskStorage({
@@ -148,8 +150,8 @@ const userController = {
                 [user.id, otpCode, expiresAt]
             );
 
-            // [SIMULATED OTP DELIVERY]
-            console.log(`\n--- [SIMULATED SMS/EMAIL OTP] ---\nTO: ${user.name} (${user.email})\nCODE: ${otpCode}\n-----------------------------------\n`);
+            // REAL OTP DELIVERY
+            await emailService.sendOTP(user.email, user.name, otpCode, 'login');
 
             res.status(200).json({
                 message: 'Verification code sent',
@@ -530,7 +532,7 @@ const userController = {
                 [user.id, otpCode, expiresAt]
             );
 
-            console.log(`\n--- [PASSWORD RESET OTP] ---\nTO: ${user.name} (${email})\nCODE: ${otpCode}\n---------------------------\n`);
+            await emailService.sendOTP(email, user.name, otpCode, 'password_reset');
 
             res.json({ message: 'If an account exists with that email, a reset code has been sent.' });
         } catch (err) {
@@ -613,7 +615,7 @@ const userController = {
                 [userId, otpCode, expiresAt]
             );
 
-            console.log(`\n--- [EMAIL VERIFY OTP] ---\nTO: ${user.name} (${user.email})\nCODE: ${otpCode}\n-------------------------\n`);
+            await emailService.sendOTP(user.email, user.name, otpCode, 'verify');
 
             res.json({ message: 'Verification code sent to your email.' });
         } catch (err) {
@@ -672,7 +674,7 @@ const userController = {
                 [userId, otpCode, expiresAt]
             );
 
-            console.log(`\n--- [PHONE VERIFY OTP] ---\nTO: ${phone}\nCODE: ${otpCode}\n-------------------------\n`);
+            await smsService.sendOTP(phone, otpCode);
 
             res.json({ message: 'Verification code sent to your phone.' });
         } catch (err) {
