@@ -2,10 +2,9 @@ const socketIo = require('socket.io');
 const messageHandler = require('./src/websocket/messageHandler');
 const http = require('http');
 const app = require('./src/app');
+const ensureSchema = require('./ensure-schema');
 const initializeDeletionJob = require('./src/jobs/deletionJob');
 
-// Boot background processes
-initializeDeletionJob();
 
 // Create HTTP server
 const server = http.createServer(app);
@@ -29,6 +28,18 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://192.168.0.102:${PORT}`);
-});
+
+// Ensure all required DB tables exist before accepting requests, then start
+ensureSchema()
+  .then(() => {
+    // Start background jobs only after schema is confirmed
+    initializeDeletionJob();
+
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('FATAL: Schema ensure failed, refusing to start:', err);
+    process.exit(1);
+  });
