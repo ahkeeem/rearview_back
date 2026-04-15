@@ -71,62 +71,98 @@ const userController = {
 
     // Create a new user
     createUser: async (req, res) => {
+        const conn = await pool.getConnection();
         try {
             const { name, email, password, phone } = req.body;
 
-            // Validate required fields — phone is optional at signup
             if (!name || !email || !password) {
                 return res.status(400).json({ error: 'Name, email, and password are required.' });
             }
 
-            // Hash the password before saving it
             const hashedPassword = await bcrypt.hash(password, 10);
 
-            // SQL query - phone is optional
+            await conn.beginTransaction();
+
+            // 1. Insert user
             const query = phone
                 ? 'INSERT INTO users (name, email, password, phone) VALUES (?, ?, ?, ?)'
                 : 'INSERT INTO users (name, email, password) VALUES (?, ?, ?)';
             const params = phone ? [name, email, hashedPassword, phone] : [name, email, hashedPassword];
-            const [result] = await pool.execute(query, params);
+            const [result] = await conn.execute(query, params);
 
-            // Check if insertion was successful
-            if (result.affectedRows > 0) {
-                const userId = result.insertId;
-                
-                // [Entity Generation Hub] Assign a generic Entity ID dynamically
-                const crypto = require('crypto');
-                const uuid = crypto.randomUUID();
-                
-                await pool.execute("INSERT INTO entities (id, type, name) VALUES (?, 'user', ?)", [uuid, name]);
-                await pool.execute("UPDATE users SET entity_id = ? WHERE id = ?", [uuid, userId]);
-
-                return res.status(201).json({
-                    message: 'User created successfully',
-                    userId: userId,
-                    entityId: uuid
-                });
+            if (!result.insertId) {
+                await conn.rollback();
+                return res.status(500).json({ error: 'User creation failed — no ID returned.' });
             }
 
-            return res.status(500).json({ error: 'User creation failed' });
+            const userId = result.insertId;
+            const crypto = require('crypto');
+            const uuid = crypto.randomUUID();
+
+            // 2. Create entity record
+            await conn.execute(
+                "INSERT INTO entities (id, type, name) VALUES (?, 'user', ?)",
+                [uuid, name]
+            );
+
+            // 3. Link entity to user
+            await conn.execute(
+                'UPDATE users SET entity_id = ? WHERE id = ?',
+                [uuid, userId]
+            );
+
+            await conn.commit();
+
+            return res.status(201).json({
+                message: 'User created successfully',
+                userId,
+                entityId: uuid
+            });
+
         } catch (error) {
-            console.error('User creation error:', error);
+            await conn.rollback().catch(() => {});
+
+            const isDev = process.env.NODE_ENV !== 'production';
+            console.error('[createUser] Error:', {
+                code: error.code,
+                message: error.message,
+                sql: isDev ? error.sql : undefined
+            });
 
             if (error.code === 'ER_DUP_ENTRY') {
-                if (error.sqlMessage && error.sqlMessage.includes('email')) {
-                    return res.status(409).json({ error: 'Email already exists. Please use a different email.' });
+                if (error.sqlMessage?.includes('email')) {
+                    return res.status(409).json({ error: 'An account with this email already exists.' });
                 }
-                if (error.sqlMessage && error.sqlMessage.includes('phone')) {
-                    return res.status(409).json({ error: 'Phone number is already associated with another account.' });
+                if (error.sqlMessage?.includes('phone')) {
+                    return res.status(409).json({ error: 'This phone number is already registered.' });
                 }
                 return res.status(409).json({ error: 'An account with these details already exists.' });
             }
 
+            if (error.code === 'ER_NO_SUCH_TABLE') {
+                return res.status(500).json({
+                    error: 'Database not fully initialised. Please try again in a moment.',
+                    code: 'SCHEMA_MISSING'
+                });
+            }
+
+            if (error.code === 'ER_BAD_FIELD_ERROR') {
+                return res.status(500).json({
+                    error: 'Database schema mismatch. Contact support.',
+                    code: 'SCHEMA_MISMATCH',
+                    ...(isDev && { detail: error.message })
+                });
+            }
+
             return res.status(500).json({
-                error: 'User creation failed',
-                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+                error: 'User creation failed. Please try again.',
+                ...(isDev && { detail: error.message, code: error.code })
             });
+        } finally {
+            conn.release();
         }
     },
+
     loginUser: async (req, res) => {
         try {
             const { email, password } = req.body;

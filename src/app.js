@@ -96,43 +96,33 @@ app.get('/', (req, res) => {
     });
 });
 
-// Health check route for Render
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok' });
+// Health check — also tests DB connectivity
+app.get('/health', async (req, res) => {
+    try {
+        const [rows] = await require('./config/database').execute('SELECT 1');
+        res.status(200).json({
+            status: 'ok',
+            db: 'connected',
+            uptime: Math.floor(process.uptime()),
+            env: process.env.NODE_ENV || 'unknown',
+            timestamp: new Date().toISOString()
+        });
+    } catch (err) {
+        res.status(503).json({
+            status: 'degraded',
+            db: 'unreachable',
+            error: err.message
+        });
+    }
 });
 
-// 404 handler
-app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        message: 'Route not found',
-        path: req.originalUrl
-    });
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-    logger.error('Unhandled error', {
-        error: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-        url: req.originalUrl,
-        method: req.method,
-        ip: req.ip
-    });
-
-    // Don't leak error details in production
-    const message = process.env.NODE_ENV === 'production' 
-        ? 'Something went wrong. Please try again later.'
-        : err.message;
-
-    res.status(err.status || 500).json({
-        success: false,
-        message,
-        ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-    });
-});
+// ── Error handling ── must be LAST ────────────────────────────────────────
+const { globalErrorHandler, notFoundHandler } = require('./middlewares/errorHandler');
+app.use(notFoundHandler);
+app.use(globalErrorHandler);
 
 module.exports = app;
+
 
 
 

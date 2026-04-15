@@ -111,12 +111,25 @@ async function ensureSchema() {
             name VARCHAR(255) NOT NULL,
             description TEXT NULL,
             avatar_url VARCHAR(255) NULL,
+            phone VARCHAR(20) NULL,
             claimed_by_user_id INT NULL,
             canonical_id VARCHAR(36) NULL,
             sentiment_score FLOAT DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     `, 'entities table');
+
+    await run(`
+        CREATE TABLE IF NOT EXISTS entity_identifiers (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            entity_id VARCHAR(36) NOT NULL,
+            identifier_type ENUM('phone','email','nin','bvn','cac') NOT NULL,
+            identifier_value VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_entity_ident (entity_id, identifier_type),
+            INDEX idx_ei_value (identifier_value)
+        )
+    `, 'entity_identifiers table');
 
     // ─── Reviews ───────────────────────────────────────────────────────────────
     await run(`
