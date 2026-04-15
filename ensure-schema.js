@@ -356,6 +356,47 @@ async function ensureSchema() {
         )
     `, 'webhook_events table');
 
+    // ─── Barter Engine ──────────────────────────────────────────────────────────
+    await run(`
+        CREATE TABLE IF NOT EXISTS barter_items (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            item_name VARCHAR(255) NOT NULL,
+            description TEXT NULL,
+            want_category VARCHAR(100) NOT NULL,
+            status ENUM('available','locked','traded','cancelled') DEFAULT 'available',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_bi_user (user_id),
+            INDEX idx_bi_status (status)
+        )
+    `, 'barter_items table');
+
+    await run(`ALTER TABLE barter_items ADD COLUMN image_url VARCHAR(255) NULL`, 'add image_url to barter_items');
+    await run(`ALTER TABLE barter_items ADD COLUMN category VARCHAR(50) DEFAULT 'other'`, 'add category to barter_items');
+
+    await run(`
+        CREATE TABLE IF NOT EXISTS trade_loops (
+            id VARCHAR(36) PRIMARY KEY,
+            loop_trust_avg DECIMAL(4,2) NOT NULL,
+            status ENUM('pending','committed','in_transit','verified','finalized','disputed','closed') DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NULL
+        )
+    `, 'trade_loops table');
+
+    await run(`
+        CREATE TABLE IF NOT EXISTS trade_transactions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            loop_id VARCHAR(36) NOT NULL,
+            from_user_id INT NOT NULL,
+            to_user_id INT NOT NULL,
+            item_id INT NOT NULL,
+            status ENUM('pending','shipped','received') DEFAULT 'pending',
+            FOREIGN KEY (loop_id) REFERENCES trade_loops(id) ON DELETE CASCADE,
+            INDEX idx_tt_loop (loop_id)
+        )
+    `, 'trade_transactions table');
+
     console.log('[Schema] ✅ Schema check complete.');
 }
 

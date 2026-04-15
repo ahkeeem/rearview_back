@@ -4,6 +4,7 @@ const http = require('http');
 const app = require('./src/app');
 const ensureSchema = require('./ensure-schema');
 const initializeDeletionJob = require('./src/jobs/deletionJob');
+const { initializeBarterMatchmakerJob } = require('./src/jobs/barterMatchmakerJob');
 
 
 // Create HTTP server
@@ -34,6 +35,7 @@ ensureSchema()
   .then(() => {
     // Start background jobs only after schema is confirmed
     initializeDeletionJob();
+    initializeBarterMatchmakerJob();
 
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on port ${PORT}`);

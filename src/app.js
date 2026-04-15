@@ -20,6 +20,7 @@ const entityRoutes = require('./routes/entityRoutes');
 const threadRoutes = require('./routes/threadRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const escrowRoutes = require('./routes/escrowRoutes');
+const barterRoutes = require('./routes/barterRoutes');
 
 const app = express();
 
@@ -75,6 +76,7 @@ app.use('/api/entities', entityRoutes);
 app.use('/api/threads', threadRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/escrow', escrowRoutes);
+app.use('/api/barter', barterRoutes);
 
 // Root route with API documentation
 app.get('/', (req, res) => {
