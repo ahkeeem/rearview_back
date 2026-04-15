@@ -264,7 +264,79 @@ const userController = {
         }
     },
 
-    logout: async (req, res) => {
+    // ── Password Reset Flow ──────────────────────────────────────────────────
+    forgotPassword: async (req, res) => {
+        try {
+            const { email } = req.body;
+            if (!email) return res.status(400).json({ error: 'Email is required' });
+
+            const [rows] = await pool.execute('SELECT id, name, email FROM users WHERE email = ?', [email]);
+            if (rows.length === 0) {
+                // Return generic 200 message to prevent email enumeration
+                return res.status(200).json({ message: 'If an account exists, a reset code has been sent.' });
+            }
+            
+            const user = rows[0];
+            const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+            const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min expiry
+
+            await pool.execute(
+                'INSERT INTO otp_codes (user_id, code, type, expires_at) VALUES (?, ?, "password_reset", ?)',
+                [user.id, otpCode, expiresAt]
+            );
+
+            // Import emailService here to avoid circular dependency issues at the top level if any
+            const emailService = require('../services/emailService');
+            const emailSent = await emailService.sendOTP(user.email, user.name, otpCode, 'password_reset');
+            
+            if (!emailSent) {
+                 return res.status(500).json({ error: 'Failed to send reset email. Please try again later.' });
+            }
+
+            res.status(200).json({ message: 'If an account exists, a reset code has been sent.' });
+        } catch (err) {
+            console.error('forgotPassword error:', err);
+            res.status(500).json({ error: 'Failed to process password reset request' });
+        }
+    },
+
+    resetPassword: async (req, res) => {
+        try {
+            const { email, code, newPassword } = req.body;
+            if (!email || !code || !newPassword) {
+                return res.status(400).json({ error: 'Missing required fields' });
+            }
+
+            const [userRows] = await pool.execute('SELECT id FROM users WHERE email = ?', [email]);
+            if (userRows.length === 0) {
+                return res.status(400).json({ error: 'Invalid or expired code.' });
+            }
+            const userId = userRows[0].id;
+
+            const [otpRows] = await pool.execute(
+                'SELECT id FROM otp_codes WHERE user_id = ? AND code = ? AND type = "password_reset" AND expires_at > ? ORDER BY created_at DESC LIMIT 1',
+                [userId, code, new Date()]
+            );
+
+            if (otpRows.length === 0) {
+                return res.status(400).json({ error: 'Invalid or expired code.' });
+            }
+
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+            await pool.execute('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, userId]);
+
+            // Invalidate the used OTP
+            await pool.execute('DELETE FROM otp_codes WHERE id = ?', [otpRows[0].id]);
+
+            res.status(200).json({ message: 'Password has been successfully reset.' });
+        } catch (err) {
+            console.error('resetPassword error:', err);
+            res.status(500).json({ error: 'Failed to reset password' });
+        }
+    },
+
+    logoutUser: async (req, res) => {
+
         try {
             const token = req.headers['authorization']?.split(' ')[1];
             const userId = req.user.userId || req.user.id;

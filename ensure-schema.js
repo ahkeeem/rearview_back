@@ -58,13 +58,19 @@ async function ensureSchema() {
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT NOT NULL,
             code VARCHAR(6) NOT NULL,
-            type ENUM('login','register','verify') NOT NULL,
+            type ENUM('login','register','verify','password_reset') NOT NULL,
             expires_at TIMESTAMP NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_otp_user (user_id),
             INDEX idx_otp_code (code)
         )
     `, 'otp_codes table');
+
+    // Run this alter in case the table already exists with the old ENUM definition
+    await run(`
+        ALTER TABLE otp_codes MODIFY COLUMN type ENUM('login','register','verify','password_reset') NOT NULL
+    `, 'update otp_codes type enum');
+
 
     // ─── Login Attempts ───────────────────────────────────────────────────────
     await run(`
