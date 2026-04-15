@@ -52,6 +52,9 @@ async function ensureSchema() {
         )
     `, 'users table');
 
+    await run(`ALTER TABLE users ADD COLUMN phone VARCHAR(20) UNIQUE NULL`, 'add phone to users');
+    await run(`ALTER TABLE users ADD COLUMN entity_id VARCHAR(36) NULL`, 'add entity_id to users');
+
     // ─── OTP Codes ────────────────────────────────────────────────────────────
     await run(`
         CREATE TABLE IF NOT EXISTS otp_codes (
@@ -124,6 +127,12 @@ async function ensureSchema() {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     `, 'entities table');
+
+    await run(`ALTER TABLE entities ADD COLUMN phone VARCHAR(20) NULL`, 'add phone to entities');
+    await run(`ALTER TABLE entities ADD COLUMN claimed_by_user_id INT NULL`, 'add claimed_by_user_id to entities');
+    await run(`ALTER TABLE entities ADD COLUMN canonical_id VARCHAR(36) NULL`, 'add canonical_id to entities');
+    await run(`ALTER TABLE entities ADD COLUMN sentiment_score FLOAT DEFAULT 0`, 'add sentiment_score to entities');
+
 
     await run(`
         CREATE TABLE IF NOT EXISTS entity_identifiers (
