@@ -2,11 +2,14 @@ const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: process.env.SMTP_PORT, // usually 587 or 465
-    secure: process.env.SMTP_PORT === '465', // true for 465, false for other ports
+    port: parseInt(process.env.SMTP_PORT, 10) || 587, // Coerce correctly for cloud environments
+    secure: process.env.SMTP_PORT == '465', // True for 465, false for 587
     auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
+    },
+    tls: {
+        rejectUnauthorized: false // CRITICAL: Fixes silent SMTP failures in deployment behind proxies or with mismatched self-signed cloud certs
     }
 });
 
