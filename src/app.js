@@ -39,19 +39,25 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // Request logging
 app.use(logger.requestLogger);
 
-// Temporary low-level request logger for deployment debugging
-app.use((req, res, next) => {
+// Debug request logging — only in non-production
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
     console.log(`[REQUEST] ${req.method} ${req.originalUrl}`);
     next();
-});
+  });
+}
 
 // Rate limiting
 app.use('/api/', apiLimiter);
 
 
 
-// Static files
-app.use('/uploads', express.static('uploads'));
+// Static files — served with nosniff to prevent XSS via uploaded files
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Disposition', 'attachment');
+  next();
+}, express.static('uploads'));
 
 // Routes
 app.use('/api/users', userRoutes);

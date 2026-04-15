@@ -51,14 +51,21 @@ const userController = {
         });
     },
 
-    // Get all users
+    // Get all users — safe fields only, never expose password or sensitive flags
     getUsers: async (req, res) => {
         try {
-            const [rows] = await pool.execute('SELECT * FROM users');
-            res.status(200).json(rows); // Return rows from the query
+            const [rows] = await pool.execute(
+                `SELECT id, name, email, photo_url, headline, location,
+                        trust_score, verification_level, role, created_at
+                 FROM users
+                 WHERE status = 'active'
+                 ORDER BY created_at DESC
+                 LIMIT 100`
+            );
+            res.status(200).json(rows);
         } catch (err) {
             console.error('Error fetching users:', err.message);
-            res.status(500).json({ error: 'An error occurred while fetching users. Please try again later.' });
+            res.status(500).json({ error: 'An error occurred while fetching users.' });
         }
     },
 
@@ -370,6 +377,13 @@ const userController = {
     updateProfile: async (req, res) => {
         try {
             const { id } = req.params;
+            const requestingUser = req.user.userId || req.user.id;
+
+            // ── Ownership check: users can only update their own profile ─────
+            if (parseInt(id) !== parseInt(requestingUser)) {
+                return res.status(403).json({ error: 'You can only update your own profile.' });
+            }
+
             const { name, email, bio, headline, location, photo_url, banner_url, phone, website } = req.body;
 
             // Build dynamic SET clause from provided fields
