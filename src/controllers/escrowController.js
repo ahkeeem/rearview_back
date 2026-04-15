@@ -2,6 +2,7 @@ const pool = require('../config/database');
 const paystack = require('../config/paystack');
 const paymentController = require('./paymentController');
 const crypto = require('crypto');
+const emailService = require('../services/emailService');
 
 const escrowController = {
 
@@ -223,6 +224,16 @@ const escrowController = {
 
       console.log(`✅ Escrow released: ${order.order_ref} — ₦${order.vendor_amount} to vendor`);
 
+      // ── Notify vendor that payment has been released ──
+      const [vendorRows] = await pool.execute('SELECT name, email FROM users WHERE id = ?', [order.vendor_id]);
+      if (vendorRows[0]) {
+        emailService.sendEscrowNotification(
+          vendorRows[0].email, vendorRows[0].name,
+          'delivery_confirmed',
+          { title: order.title, order_ref: order.order_ref, vendor_amount: order.vendor_amount }
+        ).catch(() => {}); // non-blocking
+      }
+
       res.json({
         message: 'Delivery confirmed. Funds released to vendor.',
         vendor_received: parseFloat(order.vendor_amount),
@@ -258,6 +269,17 @@ const escrowController = {
         'UPDATE escrow_orders SET status = "disputed", dispute_reason = ?, disputed_at = NOW() WHERE id = ?',
         [reason, id]
       );
+
+      // ── Notify BOTH parties that dispute has been opened ──
+      const order = orders[0];
+      const [parties] = await pool.execute(
+        'SELECT u.name, u.email FROM users u WHERE u.id IN (?, ?)',
+        [order.buyer_id, order.vendor_id]
+      );
+      const notifData = { title: order.title, order_ref: order.order_ref, dispute_reason: reason };
+      parties.forEach(p => {
+        emailService.sendEscrowNotification(p.email, p.name, 'dispute_opened', notifData).catch(() => {});
+      });
 
       res.json({ message: 'Order disputed. Funds remain locked until resolved.' });
     } catch (err) {
@@ -325,6 +347,18 @@ const escrowController = {
       }
 
       res.json({ message: `Dispute resolved: ${resolution === 'release' ? 'funds released to vendor' : 'funds refunded to buyer'}` });
+
+      // ── Notify both parties of resolution (non-blocking, after response sent) ──
+      const [parties] = await pool.execute(
+        'SELECT u.name, u.email FROM users u WHERE u.id IN (?, ?)',
+        [order.buyer_id, order.vendor_id]
+      );
+      parties.forEach(p => {
+        emailService.sendEscrowNotification(p.email, p.name, 'dispute_resolved', {
+          order_ref: order.order_ref,
+          resolution
+        }).catch(() => {});
+      });
     } catch (err) {
       console.error('Resolve dispute error:', err);
       res.status(500).json({ error: 'Failed to resolve dispute' });

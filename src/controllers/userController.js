@@ -197,7 +197,7 @@ const userController = {
 
             // Generate token and create session
             const token = jwt.sign(
-                { userId: user.id, name: user.name, email: user.email },
+                { userId: user.id, name: user.name, email: user.email, role: user.role },
                 process.env.JWT_SECRET,
                 { expiresIn: '24h' }
             );

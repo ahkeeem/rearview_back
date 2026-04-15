@@ -1,6 +1,7 @@
 const pool = require('../config/database');
 const paystack = require('../config/paystack');
 const crypto = require('crypto');
+const emailService = require('../services/emailService');
 
 const paymentController = {
 
@@ -312,6 +313,24 @@ const paymentController = {
       'UPDATE escrow_orders SET status = "funded", funded_at = NOW() WHERE id = ?',
       [order.id]
     );
+
+    // 5. Notify vendor that funds are locked and work can begin
+    const [vendorRows] = await pool.execute(
+      'SELECT u.name, u.email, buyer.name as buyer_name FROM users u, users buyer WHERE u.id = ? AND buyer.id = ?',
+      [order.vendor_id, order.buyer_id]
+    );
+    if (vendorRows[0]) {
+      emailService.sendEscrowNotification(
+        vendorRows[0].email, vendorRows[0].name,
+        'order_funded',
+        {
+          title: order.title,
+          order_ref: order.order_ref,
+          vendor_amount: order.vendor_amount,
+          buyer_name: vendorRows[0].buyer_name
+        }
+      ).catch(() => {}); // non-blocking
+    }
 
     console.log(`✅ Escrow funded: Order ${order.order_ref} — ₦${order.amount}`);
   },
