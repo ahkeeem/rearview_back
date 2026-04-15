@@ -158,7 +158,7 @@ const paymentController = {
         return res.status(400).json({ error: 'Minimum top up amount is ₦100' });
       }
 
-      const reference = `ref_topup_${Date.now()}_${userId}`;
+      const reference = `ref_topup_amt_${Math.round(parseFloat(amount))}_${Date.now()}_${userId}`;
       const [users] = await pool.execute('SELECT email FROM users WHERE id = ?', [userId]);
       const email = users[0].email;
 
@@ -229,18 +229,29 @@ const paymentController = {
   processSuccessfulPayment: async (reference) => {
     if (reference.startsWith('ref_topup_')) {
       // It's a direct wallet top-up!
-      const userId = parseInt(reference.split('_').pop());
+      // Format: ref_topup_amt_{amount}_{timestamp}_{userId}
+      const parts = reference.split('_');
+      const userId = parseInt(parts[parts.length - 1]);
       const wallet = await paymentController.getOrCreateWallet(userId);
 
       // Verify the transaction wasn't already processed
       const [existing] = await pool.execute('SELECT id FROM transactions WHERE reference = ?', [`dep_${reference}`]);
       if (existing.length > 0) return;
 
-      // In real mode, we need the exact amount from paystack. For mock, we parse from our reference or assume dummy 1000
-      let amount = 1000;
-      if (!paystack.isMockMode()) {
+      // Determine the credited amount
+      let amount = 0;
+      if (paystack.isMockMode()) {
+        // In mock mode, parse amount from the reference string or use a fixed test value
+        const storedAmount = reference.match(/amt_(\d+)_/);
+        amount = storedAmount ? parseInt(storedAmount[1]) : 1000;
+      } else {
+        // In real mode, always confirm the amount from Paystack
         const verify = await paystack.request('GET', `/transaction/verify/${reference}`);
-        if(verify.data) amount = verify.data.amount / 100;
+        if (!verify.status || verify.data.status !== 'success') {
+          console.error('Paystack verify failed for top-up:', verify);
+          return;
+        }
+        amount = verify.data.amount / 100; // convert kobo → naira
       }
       
       // Credit wallet

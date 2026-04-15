@@ -48,14 +48,20 @@ const reviewController = {
                 return res.status(429).json({ error: 'You have already reviewed this entity in the last 24 hours.' });
             }
 
-            const query = 'INSERT INTO reviews (reviewer_id, target_entity_id, rating, comment, interaction_type, proof_url) VALUES (?, ?, ?, ?, ?, ?)';
+            // [Logic from lagos_trust_builder workflow]
+            // If proof_url is present or nin_verified is true for the user, consider the review "Verified"
+            const [userStatus] = await pool.execute('SELECT nin_verified FROM users WHERE id = ?', [reviewer_id]);
+            const is_verified = (proof_url || (userStatus.length > 0 && userStatus[0].nin_verified)) ? 1 : 0;
+
+            const query = 'INSERT INTO reviews (reviewer_id, target_entity_id, rating, comment, interaction_type, proof_url, is_verified) VALUES (?, ?, ?, ?, ?, ?, ?)';
             const [result] = await pool.execute(query, [
                 reviewer_id, 
                 target_entity_id, 
                 rating, 
                 comment || null,
                 interaction_type || 'general',
-                proof_url || null
+                proof_url || null,
+                is_verified
             ]);
 
             // [Hook] Dispatch to Activity Feed
@@ -69,8 +75,12 @@ const reviewController = {
                 reviewId: result.insertId
             });
         } catch (err) {
-            console.error('Error creating review:', err.message);
-            res.status(500).json({ error: 'An error occurred while creating the review.' });
+            console.error('Error creating review [detailed]:', err);
+             // Ensure verbose error is sent to the client temporarily for debugging
+            res.status(500).json({ 
+                error: 'An error occurred while creating the review.', 
+                details: err.sqlMessage || err.message 
+            });
         }
     },
 

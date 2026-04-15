@@ -126,13 +126,13 @@ const validateProfileUpdate = [
   body('photo_url')
     .optional({ values: 'falsy' })
     .trim()
-    .isURL()
+    .isURL({ require_tld: false })   // allow localhost in dev
     .withMessage('Please provide a valid URL for your profile photo'),
 
   body('banner_url')
     .optional({ values: 'falsy' })
     .trim()
-    .isURL()
+    .isURL({ require_tld: false })   // allow localhost in dev
     .withMessage('Please provide a valid URL for your banner image'),
 
   validate

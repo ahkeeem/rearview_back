@@ -162,8 +162,8 @@ const userController = {
                 ...(process.env.NODE_ENV !== 'production' && { dev_otp: otpCode })
             });
         } catch (err) {
-            console.error('Error during login:', err.message);
-            res.status(500).json({ error: 'Security subsystem failure' });
+            console.error('Error during login [detailed]:', err);
+            res.status(500).json({ error: 'Security subsystem failure', details: err.sqlMessage || err.message });
         }
     },
 
