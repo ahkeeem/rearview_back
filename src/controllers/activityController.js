@@ -100,6 +100,23 @@ const activityController = {
             console.error('Error fetching warnings:', err);
             res.status(500).json({ error: 'Failed to fetch the warnings feed' });
         }
+    },
+    getNotifications: async (req, res) => {
+        try {
+            const userId = req.user.userId || req.user.id;
+            const [notifications] = await pool.execute(`
+                SELECT af.*, u.name as actor_name, u.photo_url as actor_avatar 
+                FROM activity_feed af
+                JOIN users u ON af.actor_id = u.id
+                WHERE af.target_user_id = ?
+                ORDER BY af.created_at DESC
+                LIMIT 20
+            `, [userId]);
+            res.status(200).json(notifications);
+        } catch (err) {
+            console.error('Error fetching notifications:', err);
+            res.status(500).json({ error: 'Failed to fetch notifications' });
+        }
     }
 };
 

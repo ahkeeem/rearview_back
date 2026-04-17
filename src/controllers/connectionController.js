@@ -37,8 +37,8 @@ const connectionController = {
             // [Hook] Dispatch to Activity Feed as a request
             try {
                 await pool.execute(
-                    "INSERT INTO activity_feed (actor_id, action_type, target_id, action_data) VALUES (?, 'connection_request', ?, ?)",
-                    [user_id, result.insertId, JSON.stringify({ to_user: connected_user_id })]
+                    "INSERT INTO activity_feed (actor_id, action_type, target_id, target_user_id, action_data) VALUES (?, 'connection_request', ?, ?, ?)",
+                    [user_id, result.insertId, result.insertId, connected_user_id, JSON.stringify({ to_user: connected_user_id })]
                 );
             } catch (e) {
                 console.error('Failed to log connection request to feed:', e);
@@ -86,13 +86,32 @@ const connectionController = {
             const { status } = req.body;
             const userId = req.user.userId || req.user.id;
 
-            if (!status || !['accepted', 'rejected'].includes(status)) {
-                return res.status(400).json({ error: 'Invalid status. Must be accepted or rejected' });
+            if (!status || !['accepted', 'rejected', 'cancelled'].includes(status)) {
+                return res.status(400).json({ error: 'Invalid status. Must be accepted, rejected, or cancelled' });
+            }
+
+            // Logic check: only recipient can accept/reject, only sender can cancel
+            const [current] = await pool.execute('SELECT user_id, connected_user_id, status FROM connections WHERE id = ?', [id]);
+            
+            if (current.length === 0) {
+                return res.status(404).json({ error: 'Connection request not found' });
+            }
+
+            const { user_id, connected_user_id, status: oldStatus } = current[0];
+
+            if (status === 'cancelled') {
+                if (userId !== user_id) {
+                    return res.status(403).json({ error: 'Only the sender can cancel a request' });
+                }
+            } else {
+                if (userId !== connected_user_id) {
+                    return res.status(403).json({ error: 'Only the recipient can accept or reject a request' });
+                }
             }
 
             const [result] = await pool.execute(
-                'UPDATE connections SET status = ? WHERE id = ? AND connected_user_id = ?',
-                [status, id, userId]
+                'UPDATE connections SET status = ? WHERE id = ?',
+                [status, id]
             );
 
             if (result.affectedRows === 0) {
@@ -102,16 +121,21 @@ const connectionController = {
             // [Hook] Dispatch to Activity Feed if accepted
             if (status === 'accepted') {
                 try {
-                    // We need the original requester's user_id from the connection
-                    const [conn] = await pool.execute('SELECT user_id FROM connections WHERE id = ?', [id]);
-                    if (conn.length > 0) {
-                        await pool.execute(
-                            "INSERT INTO activity_feed (actor_id, action_type, target_id, action_data) VALUES (?, 'connected', ?, ?)",
-                            [userId, id, JSON.stringify({ with_user: conn[0].user_id })]
-                        );
-                    }
+                    await pool.execute(
+                        "INSERT INTO activity_feed (actor_id, action_type, target_id, action_data) VALUES (?, 'connected', ?, ?)",
+                        [userId, id, JSON.stringify({ with_user: user_id })]
+                    );
                 } catch (e) {
                     console.error('Failed to log connection to feed:', e);
+                }
+            }
+
+            // [Cleanup] Remove notification for cancellations or rejections
+            if (status === 'cancelled' || status === 'rejected') {
+                try {
+                    await pool.execute("DELETE FROM activity_feed WHERE action_type = 'connection_request' AND target_id = ?", [id]);
+                } catch (e) {
+                    console.error('Failed to cleanup notification:', e);
                 }
             }
 
