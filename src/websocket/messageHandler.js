@@ -78,9 +78,9 @@ const messageHandler = (io) => {
                     );
                     finalMessageId = result.insertId;
 
-                    // Update conversation timestamp
+                    // Update conversation timestamp and increment unread count
                     await pool.execute(
-                        'UPDATE conversations SET updated_at = NOW() WHERE id = ?',
+                        'UPDATE conversations SET updated_at = NOW(), unread_count = unread_count + 1 WHERE id = ?',
                         [conversationId]
                     );
                 }
