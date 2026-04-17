@@ -13,10 +13,18 @@ const server = http.createServer(app);
 // Initialize Socket.IO with CORS configuration
 const io = socketIo(server, {
     cors: {
-      origin: "http://localhost:3000",
+      origin: (origin, callback) => {
+        const allowedOrigins = [process.env.CORS_ORIGIN, "http://localhost:3000", "https://rearview-front.vercel.app"].filter(Boolean);
+        if (!origin || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
       methods: ["GET", "POST"],
       credentials: true
-    }
+    },
+    transports: ['websocket', 'polling']
 });
 
 // Initialize socket handlers
