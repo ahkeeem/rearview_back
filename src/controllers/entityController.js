@@ -17,16 +17,9 @@ const entityController = {
                 FROM entities e
                 LEFT JOIN entity_identifiers ei ON e.id = ei.entity_id
                 WHERE (e.name LIKE ? OR e.phone = ? OR ei.identifier_value = ?)
+                ORDER BY e.name ASC LIMIT 20
             `;
             const params = [`%${searchTerm}%`, searchTerm, searchTerm];
-
-            if (type) {
-                query += ' AND e.type = ?';
-                params.push(type);
-            }
-
-            query += ' ORDER BY (e.phone = ? OR ei.identifier_value = ?) DESC, e.name ASC LIMIT 20';
-            params.push(searchTerm, searchTerm);
             
             const [entities] = await pool.execute(query, params);
             res.json(entities);
@@ -128,7 +121,8 @@ const entityController = {
                     ORDER BY sentiment_score DESC
                     LIMIT ?
                 `;
-                const [globalSuggestions] = await pool.execute(globalQuery, [userId, 5 - suggestions.length]);
+                const limitValue = Math.max(0, 5 - suggestions.length);
+                const [globalSuggestions] = await pool.execute(globalQuery, [userId, limitValue]);
                 res.json([...suggestions, ...globalSuggestions]);
             } else {
                 res.json(suggestions);

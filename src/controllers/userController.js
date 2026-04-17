@@ -43,7 +43,10 @@ const userController = {
             }
 
             // Return relative path for cross-environment compatibility
-            const imageUrl = `/uploads/${req.file.filename}`;
+            // IMPORTANT: Always ensure the prefix is consistent
+            const filename = req.file.filename;
+            const imageUrl = filename.startsWith('/uploads/') ? filename : `/uploads/${filename}`;
+            
             res.status(200).json({ 
                 message: 'Image uploaded successfully',
                 imageUrl: imageUrl 
