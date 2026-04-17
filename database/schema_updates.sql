@@ -129,3 +129,6 @@ curl http://localhost:4000/api/users/1/stats \
 -- -H "Content-Type: application/json" \
 -- -d '{"reported_user_id": 1, "reason": "Suspicious behavior", "description": "Test report"}'
 
+-- Resolve connection status length issue (Data Too Long)
+ALTER TABLE connections MODIFY COLUMN status VARCHAR(20) DEFAULT 'pending';
+
