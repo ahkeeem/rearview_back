@@ -433,6 +433,8 @@ async function ensureSchema() {
 
     await run(`ALTER TABLE threads ADD COLUMN review_id INT NULL`, 'add review_id to threads');
     await run(`ALTER TABLE comments ADD COLUMN parent_id INT NULL`, 'add parent_id to comments');
+    await run(`ALTER TABLE users ADD COLUMN nin_verified BOOLEAN DEFAULT FALSE`, 'add nin_verified to users');
+    await run(`ALTER TABLE users ADD COLUMN bvn_verified BOOLEAN DEFAULT FALSE`, 'add bvn_verified to users');
 
     console.log('[Schema] ✅ Schema check complete.');
 }

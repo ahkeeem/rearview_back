@@ -88,6 +88,56 @@ const entityController = {
             console.error('Error auto-generating entity:', err);
             res.status(500).json({ error: 'Failed to create entity' });
         }
+    },
+
+    getSuggestions: async (req, res) => {
+        try {
+            const userId = req.user.userId || req.user.id;
+
+            // Logic: 
+            // 1. Entities (Product/Business) reviewed by connections with rating >= 4
+            // 2. Exclude entities already reviewed by the user
+            // 3. Order by number of positive contact reviews
+            const query = `
+                SELECT e.*, COUNT(r.id) as connection_review_count
+                FROM entities e
+                JOIN reviews r ON e.id = r.target_entity_id
+                WHERE e.type IN ('product', 'business')
+                AND r.rating >= 4
+                AND r.reviewer_id IN (
+                    SELECT connected_user_id FROM connections WHERE user_id = ? AND status = 'accepted'
+                    UNION
+                    SELECT user_id FROM connections WHERE connected_user_id = ? AND status = 'accepted'
+                )
+                AND e.id NOT IN (
+                    SELECT target_entity_id FROM reviews WHERE reviewer_id = ?
+                )
+                GROUP BY e.id
+                ORDER BY connection_review_count DESC, e.sentiment_score DESC
+                LIMIT 5
+            `;
+
+            const [suggestions] = await pool.execute(query, [userId, userId, userId]);
+
+            // Fallback: Global trending if network data is low
+            if (suggestions.length < 3) {
+                const globalQuery = `
+                    SELECT * FROM entities 
+                    WHERE type IN ('product', 'business')
+                    AND id NOT IN (SELECT target_entity_id FROM reviews WHERE reviewer_id = ?)
+                    ORDER BY sentiment_score DESC
+                    LIMIT ?
+                `;
+                const [globalSuggestions] = await pool.execute(globalQuery, [userId, 5 - suggestions.length]);
+                res.json([...suggestions, ...globalSuggestions]);
+            } else {
+                res.json(suggestions);
+            }
+
+        } catch (err) {
+            console.error('Error fetching entity suggestions:', err);
+            res.status(500).json({ error: 'Failed to generate trust-based suggestions' });
+        }
     }
 };
 
