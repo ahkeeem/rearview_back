@@ -56,7 +56,6 @@ app.use('/api/', apiLimiter);
 // Static files — served with nosniff to prevent XSS via uploaded files
 app.use('/uploads', (req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Content-Disposition', 'attachment');
   next();
 }, express.static('uploads'));
 

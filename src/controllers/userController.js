@@ -42,8 +42,8 @@ const userController = {
                 return res.status(400).json({ error: 'Please select an image file to upload.' });
             }
 
-            // Return full local URL for development
-            const imageUrl = `http://localhost:4000/uploads/${req.file.filename}`;
+            // Return relative path for cross-environment compatibility
+            const imageUrl = `/uploads/${req.file.filename}`;
             res.status(200).json({ 
                 message: 'Image uploaded successfully',
                 imageUrl: imageUrl 
