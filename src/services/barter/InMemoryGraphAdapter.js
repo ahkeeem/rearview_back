@@ -23,9 +23,16 @@ class InMemoryGraphAdapter extends GraphAdapter {
                 // Cannot trade with yourself
                 if (fromItem.user_id === toItem.user_id) continue;
                 
-                // If From wants what To has:
-                // (Assuming want_category aligns with item_name for now)
-                if (toItem.item_name.toLowerCase().includes(fromItem.want_category.toLowerCase())) {
+                // 2. Determine Match:
+                // We have a match if User A's `want_category` matches User B's core `category` OR `item_name`.
+                const fromWants = fromItem.want_category.toLowerCase();
+                const toHasCategory = (toItem.category || 'other').toLowerCase();
+                const toHasName = toItem.item_name.toLowerCase();
+
+                const isDirectCategoryMatch = toHasCategory === fromWants;
+                const isFuzzyNameMatch = toHasName.includes(fromWants);
+
+                if (isDirectCategoryMatch || isFuzzyNameMatch) {
                     adjMap.get(fromItem.id).push(toItem);
                 }
             }

@@ -2,14 +2,14 @@ const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT, 10) || 587, // Coerce correctly for cloud environments
-    secure: process.env.SMTP_PORT == '465', // True for 465, false for 587
+    port: parseInt(process.env.SMTP_PORT, 10) || 465, // Default to 465 for cloud SSL compatibility
+    secure: process.env.SMTP_PORT == '465' || !process.env.SMTP_PORT, // True if 465, false for 587
     auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
     },
     tls: {
-        rejectUnauthorized: false // CRITICAL: Fixes silent SMTP failures in deployment behind proxies or with mismatched self-signed cloud certs
+        rejectUnauthorized: false // Fixes silent SMTP failures in cloud environments
     }
 });
 
@@ -50,8 +50,8 @@ const emailService = {
             return true;
         } catch (error) {
             console.error('❌ Failed to send email:', error);
-            // Don't throw for now to avoid crashing the flow if SMTP isn't set up yet
-            return false;
+            // Throw so the calling controller knows delivery failed
+            throw error;
         }
     },
 
@@ -142,7 +142,7 @@ const emailService = {
             return true;
         } catch (err) {
             console.error(`❌ Escrow email (${context}) failed:`, err.message);
-            return false;
+            throw err;
         }
     }
 };

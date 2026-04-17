@@ -13,11 +13,21 @@ async function ensureSchema() {
             await pool.execute(sql);
             console.log(`[Schema] ✓ ${label}`);
         } catch (err) {
-            // Ignore "already exists" errors for ALTER TABLE
-            if (err.code === 'ER_DUP_FIELDNAME' || err.code === 'ER_TABLE_EXISTS_ERROR') {
-                console.log(`[Schema] ~ ${label} (already exists)`);
+            // ER_DUP_FIELDNAME: column already exists
+            // ER_TABLE_EXISTS_ERROR: table already exists
+            // ER_DUP_KEYNAME: index already exists
+            const alreadyExists = ['ER_DUP_FIELDNAME', 'ER_TABLE_EXISTS_ERROR', 'ER_DUP_KEYNAME'].includes(err.code);
+            
+            if (alreadyExists) {
+                console.log(`[Schema] ~ ${label} (present)`);
             } else {
-                console.error(`[Schema] ✗ ${label}:`, err.message);
+                console.error(`[Schema] ✗ ${label} FAILED:`, {
+                    code: err.code,
+                    message: err.message,
+                    sql: process.env.NODE_ENV !== 'production' ? sql : undefined
+                });
+                // In production, we don't want to crash everything if some non-critical ALTER fails,
+                // but for CORE tables we should probably know.
             }
         }
     };
@@ -398,6 +408,19 @@ async function ensureSchema() {
     `, 'trade_transactions table');
 
     console.log('[Schema] ✅ Schema check complete.');
+}
+
+// Self-run check if called directly (e.g. npm run db:sync)
+if (require.main === module) {
+    ensureSchema()
+        .then(() => {
+            console.log('[Schema] Manual sync successful.');
+            process.exit(0);
+        })
+        .catch(err => {
+            console.error('[Schema] Manual sync failed:', err);
+            process.exit(1);
+        });
 }
 
 module.exports = ensureSchema;

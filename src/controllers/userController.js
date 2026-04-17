@@ -150,7 +150,10 @@ const userController = {
                 return res.status(500).json({
                     error: 'Database schema mismatch. Contact support.',
                     code: 'SCHEMA_MISMATCH',
-                    ...(isDev && { detail: error.message })
+                    ...(isDev && { 
+                        detail: `Missing field: ${error.message.split("'")[1] || 'Unknown'}`,
+                        original: error.message 
+                    })
                 });
             }
 
@@ -194,7 +197,15 @@ const userController = {
             );
 
             // REAL OTP DELIVERY
-            await emailService.sendOTP(user.email, user.name, otpCode, 'login');
+            try {
+                await emailService.sendOTP(user.email, user.name, otpCode, 'login');
+            } catch (mailError) {
+                console.error('[loginUser] Email Delivery Failed:', mailError.message);
+                return res.status(500).json({ 
+                    error: 'Email verification code could not be sent. Please check your SMTP settings.',
+                    ...(process.env.NODE_ENV !== 'production' && { detail: mailError.message })
+                });
+            }
 
             res.status(200).json({
                 message: 'Verification code sent',
