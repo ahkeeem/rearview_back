@@ -5,6 +5,7 @@ const { verifyToken } = require('../middlewares/authMiddleware');
 
 // Entity threads collection routes
 router.get('/entity/:entityId', verifyToken, threadController.getThreadsByEntity);
+router.get('/review/:reviewId', verifyToken, threadController.getThreadByReviewId);
 router.post('/', verifyToken, threadController.createThread);
 
 // Internal conversation string manipulation routes

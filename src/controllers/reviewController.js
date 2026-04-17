@@ -70,6 +70,12 @@ const reviewController = {
                 [reviewer_id, result.insertId, target_entity_id, JSON.stringify({ rating })]
             );
 
+            // [Hook] Initialize Community Discussion Thread for this review
+            await pool.execute(
+                "INSERT INTO threads (entity_id, review_id, title, author_id) VALUES (?, ?, ?, ?)",
+                [target_entity_id, result.insertId, `Discussion: Review of ${target_entity_id}`, reviewer_id]
+            );
+
             res.status(201).json({
                 message: 'Review created successfully',
                 reviewId: result.insertId
