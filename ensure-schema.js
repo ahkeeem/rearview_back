@@ -261,10 +261,13 @@ async function ensureSchema() {
     await run(`
         CREATE TABLE IF NOT EXISTS conversations (
             id INT PRIMARY KEY AUTO_INCREMENT,
+            unread_count INT DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )
     `, 'conversations table');
+
+    await run(`ALTER TABLE conversations ADD COLUMN unread_count INT DEFAULT 0`, 'add unread_count to conversations');
 
     await run(`
         CREATE TABLE IF NOT EXISTS conversation_participants (
