@@ -126,14 +126,23 @@ const validateProfileUpdate = [
   body('photo_url')
     .optional({ values: 'falsy' })
     .trim()
-    .isURL({ require_tld: false })   // allow localhost in dev
-    .withMessage('Please provide a valid URL for your profile photo'),
+    .custom((value) => {
+      // Allow relative paths starting with /uploads/ or valid URLs
+      if (value.startsWith('/uploads/') || validator.isURL(value, { require_tld: false })) {
+        return true;
+      }
+      throw new Error('Please provide a valid URL or path for your profile photo');
+    }),
 
   body('banner_url')
     .optional({ values: 'falsy' })
     .trim()
-    .isURL({ require_tld: false })   // allow localhost in dev
-    .withMessage('Please provide a valid URL for your banner image'),
+    .custom((value) => {
+      if (value.startsWith('/uploads/') || validator.isURL(value, { require_tld: false })) {
+        return true;
+      }
+      throw new Error('Please provide a valid URL or path for your banner image');
+    }),
 
   validate
 ];
