@@ -34,6 +34,16 @@ const connectionController = {
                 [user_id, connected_user_id]
             );
 
+            // [Hook] Dispatch to Activity Feed as a request
+            try {
+                await pool.execute(
+                    "INSERT INTO activity_feed (actor_id, action_type, target_id, action_data) VALUES (?, 'connection_request', ?, ?)",
+                    [user_id, result.insertId, JSON.stringify({ to_user: connected_user_id })]
+                );
+            } catch (e) {
+                console.error('Failed to log connection request to feed:', e);
+            }
+
             res.status(201).json({
                 message: 'Connection request sent successfully',
                 connectionId: result.insertId
@@ -109,6 +119,34 @@ const connectionController = {
         } catch (err) {
             console.error('Error updating connection:', err);
             res.status(500).json({ error: 'Failed to update connection status' });
+        }
+    },
+    deleteConnection: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const userId = req.user.userId || req.user.id;
+
+            // Users can only delete connections they are part of
+            const [result] = await pool.execute(
+                'DELETE FROM connections WHERE id = ? AND (user_id = ? OR connected_user_id = ?)',
+                [id, userId, userId]
+            );
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'Connection not found or unauthorized' });
+            }
+
+            // Cleanup related notifications
+            try {
+                await pool.execute("DELETE FROM activity_feed WHERE action_type = 'connection_request' AND target_id = ?", [id]);
+            } catch (e) {
+                console.error('Failed to cleanup connection notifications:', e);
+            }
+
+            res.json({ message: 'Connection or request removed successfully' });
+        } catch (err) {
+            console.error('Error deleting connection:', err);
+            res.status(500).json({ error: 'Failed to remove connection' });
         }
     }
 };

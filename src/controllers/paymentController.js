@@ -101,7 +101,8 @@ const paymentController = {
 
       if (paystack.isMockMode()) {
         // MOCK: simulate Paystack response
-        const mockUrl = `http://localhost:3000/dashboard/wallet?mock_payment=true&reference=${reference}&order=${escrow_order_id}`;
+        const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const mockUrl = `${baseUrl}/dashboard/wallet?mock_payment=true&reference=${reference}&order=${escrow_order_id}`;
         
         // Store reference on order
         await pool.execute(
@@ -164,7 +165,8 @@ const paymentController = {
       const email = users[0].email;
 
       if (paystack.isMockMode()) {
-        const mockUrl = `http://localhost:3000/dashboard/wallet?mock_payment=true&reference=${reference}&topup=true`;
+        const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const mockUrl = `${baseUrl}/dashboard/wallet?mock_payment=true&reference=${reference}&topup=true`;
         
         return res.json({
           status: true,

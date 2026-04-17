@@ -11,12 +11,14 @@ const entityController = {
                 return res.status(400).json({ error: 'Search term is required' });
             }
 
-            // Universal Identity Search (Names + Multi-Identifiers)
+            // Universal Identity Search (Names + Multi-Identifiers + Privacy Filter)
             let query = `
                 SELECT DISTINCT e.id, e.type, e.name, e.description, e.avatar_url, e.sentiment_score, e.phone
                 FROM entities e
                 LEFT JOIN entity_identifiers ei ON e.id = ei.entity_id
+                LEFT JOIN users u ON e.id = u.entity_id
                 WHERE (e.name LIKE ? OR e.phone = ? OR ei.identifier_value = ?)
+                AND (u.reviews_enabled IS NULL OR u.reviews_enabled = TRUE)
                 ORDER BY e.name ASC LIMIT 20
             `;
             const params = [`%${searchTerm}%`, searchTerm, searchTerm];

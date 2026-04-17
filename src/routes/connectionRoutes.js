@@ -11,5 +11,7 @@ router.post('/', verifyToken, requireVerified, validateConnection, connectionCon
 router.get('/', verifyToken, connectionController.getConnections);
 // Update
 router.put('/:id/status', verifyToken, requireVerified, connectionController.updateConnectionStatus);
+// Delete (Cancel / Unfriend)
+router.delete('/:id', verifyToken, requireVerified, connectionController.deleteConnection);
 
 module.exports = router;

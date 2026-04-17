@@ -467,7 +467,9 @@ const userController = {
                     (c.user_id = u.id AND c.connected_user_id = ?) 
                     OR 
                     (c.connected_user_id = u.id AND c.user_id = ?)
-                WHERE (u.name LIKE ? OR u.email LIKE ?) AND u.status IN ('active', 'deactivated')
+                WHERE (u.name LIKE ? OR u.email LIKE ?) 
+                  AND u.status IN ('active', 'deactivated')
+                  AND u.reviews_enabled = TRUE
             `;
             const [users] = await pool.execute(query, [callerId, callerId, `%${searchTerm}%`, `%${searchTerm}%`]);
             res.json(users);
@@ -481,7 +483,7 @@ const userController = {
         try {
             const { id } = req.params;
             const [user] = await pool.execute(
-                'SELECT id, name, email, bio, headline, location, photo_url, banner_url, phone, website, entity_id, status, verification_level, nin_verified, bvn_verified, email_verified, phone_verified FROM users WHERE id = ?',
+                'SELECT id, name, email, bio, headline, location, photo_url, banner_url, phone, website, entity_id, status, verification_level, reviews_enabled, nin_verified, bvn_verified, email_verified, phone_verified FROM users WHERE id = ?',
                 [id]
             );
             
@@ -506,7 +508,7 @@ const userController = {
                 return res.status(403).json({ error: 'You can only update your own profile.' });
             }
 
-            const { name, email, bio, headline, location, photo_url, banner_url, phone, website } = req.body;
+            const { name, email, bio, headline, location, photo_url, banner_url, phone, website, reviews_enabled } = req.body;
 
             // Build dynamic SET clause from provided fields
             const fields = [];
@@ -520,6 +522,7 @@ const userController = {
             if (banner_url !== undefined) { fields.push('banner_url = ?'); values.push(banner_url); }
             if (phone !== undefined) { fields.push('phone = ?'); values.push(phone); }
             if (website !== undefined) { fields.push('website = ?'); values.push(website); }
+            if (reviews_enabled !== undefined) { fields.push('reviews_enabled = ?'); values.push(reviews_enabled); }
 
             if (fields.length === 0) {
                 return res.status(400).json({ error: 'No fields to update' });

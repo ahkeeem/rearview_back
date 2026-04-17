@@ -76,6 +76,7 @@ async function ensureSchema() {
     await run(`ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT FALSE`, 'add email_verified to users');
     await run(`ALTER TABLE users ADD COLUMN phone_verified BOOLEAN DEFAULT FALSE`, 'add phone_verified to users');
     await run(`ALTER TABLE users ADD COLUMN status ENUM('active','deactivated','pending_deletion','anonymized') DEFAULT 'active'`, 'add status to users');
+    await run(`ALTER TABLE users ADD COLUMN reviews_enabled BOOLEAN DEFAULT TRUE`, 'add reviews_enabled to users');
 
     // ─── OTP Codes ────────────────────────────────────────────────────────────
     await run(`
