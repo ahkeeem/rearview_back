@@ -10,7 +10,11 @@ const paymentController = {
     const [wallets] = await pool.execute('SELECT * FROM wallets WHERE user_id = ?', [userId]);
     if (wallets.length > 0) return wallets[0];
 
-    await pool.execute('INSERT INTO wallets (user_id) VALUES (?)', [userId]);
+    try {
+      await pool.execute('INSERT INTO wallets (user_id) VALUES (?)', [userId]);
+    } catch (err) {
+      if (err.code !== 'ER_DUP_ENTRY') throw err;
+    }
     const [created] = await pool.execute('SELECT * FROM wallets WHERE user_id = ?', [userId]);
     return created[0];
   },
@@ -48,8 +52,8 @@ const paymentController = {
         FROM transactions t 
         WHERE t.debit_wallet_id = ? OR t.credit_wallet_id = ?
         ORDER BY t.created_at DESC 
-        LIMIT ? OFFSET ?`,
-        [wallet.id, wallet.id, wallet.id, limit, offset]
+        LIMIT ${limit} OFFSET ${offset}`,
+        [wallet.id, wallet.id, wallet.id]
       );
 
       const [countResult] = await pool.execute(

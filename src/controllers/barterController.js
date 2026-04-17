@@ -143,8 +143,7 @@ exports.browseItems = async (req, res) => {
             params.push(category);
         }
 
-        query += ' ORDER BY bi.created_at DESC LIMIT ? OFFSET ?';
-        params.push(limit, offset);
+        query += ` ORDER BY bi.created_at DESC LIMIT ${limit} OFFSET ${offset}`;
 
         const [items] = await conn.execute(query, params);
 
