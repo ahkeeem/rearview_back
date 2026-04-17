@@ -189,6 +189,7 @@ async function ensureSchema() {
             INDEX idx_rev_reviewer (reviewer_id),
             INDEX idx_rev_entity (target_entity_id)
         )
+    `, 'reviews table');
     await run(`ALTER TABLE reviews ADD COLUMN target_entity_id VARCHAR(36) NULL`, 'add target_entity_id to reviews');
     await run(`ALTER TABLE reviews ADD COLUMN is_disputed BOOLEAN DEFAULT FALSE`, 'add is_disputed to reviews');
     await run(`ALTER TABLE reviews ADD COLUMN dispute_reason TEXT NULL`, 'add dispute_reason to reviews');
