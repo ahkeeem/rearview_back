@@ -107,6 +107,11 @@ app.get('/', (req, res) => {
     });
 });
 
+// Neutral root POST handler for pulses/form-fallbacks
+app.post('/', (req, res) => {
+    res.status(200).json({ status: 'ok', message: 'Pulse received' });
+});
+
 // Health check — also tests DB connectivity
 app.get('/health', async (req, res) => {
     try {

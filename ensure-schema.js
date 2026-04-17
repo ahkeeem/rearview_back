@@ -1,12 +1,16 @@
-/**
- * ensure-schema.js
- * Runs on every server start. Creates any missing tables using
- * CREATE TABLE IF NOT EXISTS — safe to run against any state.
- */
 const pool = require('./src/config/database');
+const fs = require('fs');
+const path = require('path');
 
 async function ensureSchema() {
     console.log('[Schema] Checking and applying schema...');
+
+    // ─── Ensure Uploads Directory ─────────────────────────────────────────────
+    const uploadsDir = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+        console.log('[Schema] ✓ Created uploads directory');
+    }
 
     const run = async (sql, label) => {
         try {
@@ -216,13 +220,17 @@ async function ensureSchema() {
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT NOT NULL,
             connected_user_id INT NOT NULL,
-            status ENUM('pending','accepted','declined','blocked') DEFAULT 'pending',
+            status ENUM('pending','accepted','rejected','blocked','cancelled') DEFAULT 'pending',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uq_connection (user_id, connected_user_id),
             INDEX idx_conn_user (user_id),
             INDEX idx_conn_target (connected_user_id)
         )
     `, 'connections table');
+
+    await run(`
+        ALTER TABLE connections MODIFY COLUMN status ENUM('pending','accepted','rejected','blocked','cancelled') DEFAULT 'pending'
+    `, 'update connections status enum');
 
     // ─── Verifications ─────────────────────────────────────────────────────────
     await run(`
@@ -283,15 +291,20 @@ async function ensureSchema() {
         CREATE TABLE IF NOT EXISTS activity_feed (
             id INT AUTO_INCREMENT PRIMARY KEY,
             actor_id INT NOT NULL,
-            action_type ENUM('wrote_review','connected','created_post','disputed_review') NOT NULL,
+            action_type ENUM('wrote_review','connected','created_post','disputed_review','connection_request') NOT NULL,
             target_id VARCHAR(255) NULL,
+            target_user_id INT NULL,
             target_entity_id VARCHAR(36) NULL,
             action_data JSON NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            INDEX idx_af_actor (actor_id)
+            INDEX idx_af_actor (actor_id),
+            INDEX idx_af_target_user (target_user_id)
         )
     `, 'activity_feed table');
 
+    await run(`ALTER TABLE activity_feed ADD COLUMN target_user_id INT NULL`, 'add target_user_id to activity_feed');
+    await run(`ALTER TABLE activity_feed ADD INDEX idx_af_target_user (target_user_id)`, 'add index to target_user_id');
+    await run(`ALTER TABLE activity_feed MODIFY COLUMN action_type ENUM('wrote_review','connected','created_post','disputed_review','connection_request') NOT NULL`, 'update action_type enum in activity_feed');
     await run(`ALTER TABLE activity_feed ADD COLUMN target_entity_id VARCHAR(36) NULL`, 'add target_entity_id to activity_feed');
     await run(`ALTER TABLE activity_feed ADD COLUMN action_data JSON NULL`, 'add action_data to activity_feed');
 

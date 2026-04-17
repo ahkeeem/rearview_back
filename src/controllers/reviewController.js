@@ -31,11 +31,22 @@ const reviewController = {
 
             // Fallback for legacy flows generating User targeted reviews
             if (!target_entity_id && reviewee_id) {
-                const [users] = await pool.execute('SELECT entity_id FROM users WHERE id = ?', [reviewee_id]);
+                const [users] = await pool.execute('SELECT entity_id, reviews_enabled FROM users WHERE id = ?', [reviewee_id]);
                 if (users.length === 0 || !users[0].entity_id) {
                      return res.status(404).json({ error: 'Target user entity not found.' });
                 }
+                
+                if (users[0].reviews_enabled === 0 || users[0].reviews_enabled === false) {
+                    return res.status(403).json({ error: 'This user has opted out of receiving public reviews.' });
+                }
+                
                 target_entity_id = users[0].entity_id;
+            } else if (target_entity_id) {
+                // Also check if the target entity is a User who has reviews disabled
+                const [targetUsers] = await pool.execute('SELECT reviews_enabled FROM users WHERE entity_id = ?', [target_entity_id]);
+                if (targetUsers.length > 0 && (targetUsers[0].reviews_enabled === 0 || targetUsers[0].reviews_enabled === false)) {
+                    return res.status(403).json({ error: 'This user has opted out of receiving public reviews.' });
+                }
             }
 
             // Anti-Abuse: Check for existing review in last 24h
