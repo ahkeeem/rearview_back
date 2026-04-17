@@ -60,6 +60,15 @@ app.use('/uploads', (req, res, next) => {
   next();
 }, express.static('uploads'));
 
+// Health Check
+app.get('/health', (req, res) => {
+    res.status(200).json({ 
+        status: 'OK', 
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV 
+    });
+});
+
 // Routes
 app.use('/api/users', userRoutes);
 app.use('/api/reviews', reviewRoutes);
