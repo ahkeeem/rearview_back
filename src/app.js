@@ -54,10 +54,11 @@ app.use('/api/', apiLimiter);
 
 
 // Static files — served with nosniff to prevent XSS via uploaded files
+const path = require('path');
 app.use('/uploads', (req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   next();
-}, express.static('uploads'));
+}, express.static(path.join(__dirname, '../uploads')));
 
 // Health Check
 app.get('/health', (req, res) => {

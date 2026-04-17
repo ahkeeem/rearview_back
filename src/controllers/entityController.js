@@ -122,7 +122,9 @@ const entityController = {
                     LIMIT ?
                 `;
                 const limitValue = Math.max(0, 5 - suggestions.length);
-                const [globalSuggestions] = await pool.execute(globalQuery, [userId, limitValue]);
+                const limitInt = parseInt(limitValue) || 0;
+                // Using query with manual limit interpolation to bypass driver prepared statement issues
+                const [globalSuggestions] = await pool.query(globalQuery.replace('LIMIT ?', `LIMIT ${limitInt}`), [userId]);
                 res.json([...suggestions, ...globalSuggestions]);
             } else {
                 res.json(suggestions);

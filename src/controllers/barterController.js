@@ -5,7 +5,7 @@ const path = require('path');
 
 // Multer config for barter item images
 const barterStorage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, 'uploads/'),
+    destination: (req, file, cb) => cb(null, path.join(process.cwd(), 'uploads')),
     filename: (req, file, cb) => {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         cb(null, 'barter-' + uniqueSuffix + path.extname(file.originalname));
