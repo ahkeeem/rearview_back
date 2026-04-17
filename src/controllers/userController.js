@@ -498,7 +498,7 @@ const userController = {
         try {
             const { id } = req.params;
             const [user] = await pool.execute(
-                'SELECT id, name, email, bio, headline, location, photo_url, banner_url, phone, website, entity_id, status, verification_level, reviews_enabled, nin_verified, bvn_verified, email_verified, phone_verified FROM users WHERE id = ?',
+                'SELECT id, name, email, bio, headline, location, photo_url, banner_url, phone, website, entity_id, status, verification_level, reviews_enabled, nin_verified, bvn_verified, email_verified, phone_verified, created_at FROM users WHERE id = ?',
                 [id]
             );
             
