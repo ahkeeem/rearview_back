@@ -5,6 +5,7 @@ const activityController = {
         try {
             const userId = req.user.userId || req.user.id;
             const scope = req.query.scope || 'mixed'; // 'connections', 'global', 'mixed'
+            const sinceId = req.query.sinceId ? parseInt(req.query.sinceId) : null;
 
             let query = '';
             let params = [];
@@ -16,15 +17,16 @@ const activityController = {
                     FROM activity_feed af
                     JOIN users u ON af.actor_id = u.id
                     LEFT JOIN entities e ON af.target_entity_id = e.id
-                    WHERE af.actor_id IN (
+                    WHERE (af.actor_id IN (
                         SELECT connected_user_id FROM connections WHERE user_id = ? AND status = 'accepted'
                         UNION
                         SELECT user_id FROM connections WHERE connected_user_id = ? AND status = 'accepted'
-                    )
+                    ))
+                    ${sinceId ? 'AND af.id > ?' : ''}
                     ORDER BY af.created_at DESC
                     LIMIT 50
                 `;
-                params = [userId, userId];
+                params = sinceId ? [userId, userId, sinceId] : [userId, userId];
             } else if (scope === 'global') {
                 // Return generic global activity, ignoring connections. Prioritize 'wrote_review'
                 query = `
@@ -33,10 +35,11 @@ const activityController = {
                     JOIN users u ON af.actor_id = u.id
                     LEFT JOIN entities e ON af.target_entity_id = e.id
                     WHERE af.action_type IN ('wrote_review', 'created_post')
+                    ${sinceId ? 'AND af.id > ?' : ''}
                     ORDER BY af.created_at DESC
                     LIMIT 50
                 `;
-                params = [];
+                params = sinceId ? [sinceId] : [];
             } else {
                 // 'mixed' - Instagram-style: Return connections activity mixed with global trending reviews
                 query = `
@@ -57,10 +60,12 @@ const activityController = {
                         LEFT JOIN entities e ON af.target_entity_id = e.id
                         WHERE af.action_type = 'wrote_review'
                     ) as combined
+                    WHERE 1 = 1
+                    ${sinceId ? 'AND combined.id > ?' : ''}
                     ORDER BY combined.created_at DESC
                     LIMIT 50
                 `;
-                params = [userId, userId];
+                params = sinceId ? [userId, userId, sinceId] : [userId, userId];
             }
 
             const [feed] = await pool.execute(query, params);
