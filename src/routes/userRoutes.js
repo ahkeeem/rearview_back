@@ -21,6 +21,7 @@ router.get('/profile/:id', verifyToken, userController.getUserProfile);
 router.put('/profile/:id', verifyToken, validateProfileUpdate, userController.updateProfile);
 router.post('/upload-image', verifyToken, userController.uploadImage);
 router.delete('/profile/:id', verifyToken, userController.deleteAccount);
+router.put('/2fa', verifyToken, userController.toggle2FA);
 router.post('/verify', verifyToken, userController.submitVerification);
 router.get('/verify/status', verifyToken, userController.getVerificationStatus);
 

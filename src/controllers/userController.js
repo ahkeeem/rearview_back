@@ -6,6 +6,28 @@ const path = require('path');
 const emailService = require('../services/emailService');
 const smsService = require('../services/smsService');
 
+// Helper to issue token and create session
+const issueUserSession = async (user, ip) => {
+    const token = jwt.sign(
+        { userId: user.id, name: user.name, email: user.email, role: user.role },
+        process.env.JWT_SECRET,
+        { expiresIn: '24h' }
+    );
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await pool.execute(
+        'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
+        [user.id, token, expiresAt]
+    );
+
+    await pool.execute(
+        'INSERT INTO activity_logs (user_id, action_type, ip_address) VALUES (?, ?, ?)',
+        [user.id, 'LOGIN_VERIFIED', ip]
+    );
+
+    return token;
+};
+
 // Multer Storage for local uploads
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -190,7 +212,17 @@ const userController = {
                 return res.status(401).json({ error: 'Identity not recognized' });
             }
 
-            // 2. Generate 6-digit OTP
+            // 2. Check if 2FA is enabled (defaults to true if column missing or null)
+            if (user.two_factor_enabled === 0) {
+                const token = await issueUserSession(user, req.ip);
+                return res.status(200).json({
+                    message: 'Login successful',
+                    token,
+                    user: { id: user.id, name: user.name, email: user.email }
+                });
+            }
+
+            // 3. Generate 6-digit OTP
             const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
             const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
@@ -245,24 +277,7 @@ const userController = {
             const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ?', [userId]);
             const user = userRows[0];
 
-            // Generate token and create session
-            const token = jwt.sign(
-                { userId: user.id, name: user.name, email: user.email, role: user.role },
-                process.env.JWT_SECRET,
-                { expiresIn: '24h' }
-            );
-            const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    
-            await pool.execute(
-                'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
-                [user.id, token, expiresAt]
-            );
-
-            // Log activity
-            await pool.execute(
-                'INSERT INTO activity_logs (user_id, action_type, ip_address) VALUES (?, ?, ?)',
-                [user.id, 'LOGIN_VERIFIED', req.ip]
-            );
+            const token = await issueUserSession(user, req.ip);
 
             // Cleanup code
             await pool.execute('DELETE FROM otp_codes WHERE id = ?', [rows[0].id]);
@@ -847,6 +862,23 @@ const userController = {
         } catch (err) {
             console.error('Confirm phone verification error:', err);
             res.status(500).json({ error: 'Verification failed' });
+        }
+    },
+
+    toggle2FA: async (req, res) => {
+        try {
+            const userId = req.user.userId || req.user.id;
+            const { enabled } = req.body;
+            
+            await pool.execute(
+                'UPDATE users SET two_factor_enabled = ? WHERE id = ?',
+                [enabled ? 1 : 0, userId]
+            );
+            
+            res.status(200).json({ message: `2FA \${enabled ? 'enabled' : 'disabled'} successfully` });
+        } catch (err) {
+            console.error('Toggle 2FA error:', err);
+            res.status(500).json({ error: 'Failed to update 2FA setting' });
         }
     }
 };

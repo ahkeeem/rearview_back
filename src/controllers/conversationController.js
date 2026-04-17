@@ -88,8 +88,10 @@ const conversationController = {
                     c.id,
                     c.created_at,
                     c.updated_at,
+                    c.unread_count,
                     (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message,
                     (SELECT created_at FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message_time,
+                    (SELECT sender_id FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_sender_id,
                     (SELECT name FROM users u 
                      JOIN conversation_participants cp2 ON u.id = cp2.user_id 
                      WHERE cp2.conversation_id = c.id AND cp2.user_id != ? LIMIT 1) as participant_name,
