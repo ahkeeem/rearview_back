@@ -64,6 +64,18 @@ async function ensureSchema() {
 
     await run(`ALTER TABLE users ADD COLUMN phone VARCHAR(20) UNIQUE NULL`, 'add phone to users');
     await run(`ALTER TABLE users ADD COLUMN entity_id VARCHAR(36) NULL`, 'add entity_id to users');
+    await run(`ALTER TABLE users ADD COLUMN bio TEXT NULL`, 'add bio to users');
+    await run(`ALTER TABLE users ADD COLUMN headline VARCHAR(255) NULL`, 'add headline to users');
+    await run(`ALTER TABLE users ADD COLUMN location VARCHAR(255) NULL`, 'add location to users');
+    await run(`ALTER TABLE users ADD COLUMN photo_url VARCHAR(255) NULL`, 'add photo_url to users');
+    await run(`ALTER TABLE users ADD COLUMN banner_url VARCHAR(255) NULL`, 'add banner_url to users');
+    await run(`ALTER TABLE users ADD COLUMN website VARCHAR(255) NULL`, 'add website to users');
+    await run(`ALTER TABLE users ADD COLUMN trust_score INT DEFAULT 0`, 'add trust_score to users');
+    await run(`ALTER TABLE users ADD COLUMN verification_level ENUM('none','phone','advanced') DEFAULT 'none'`, 'add verification_level to users');
+    await run(`ALTER TABLE users ADD COLUMN is_verified BOOLEAN DEFAULT FALSE`, 'add is_verified to users');
+    await run(`ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT FALSE`, 'add email_verified to users');
+    await run(`ALTER TABLE users ADD COLUMN phone_verified BOOLEAN DEFAULT FALSE`, 'add phone_verified to users');
+    await run(`ALTER TABLE users ADD COLUMN status ENUM('active','deactivated','pending_deletion','anonymized') DEFAULT 'active'`, 'add status to users');
 
     // ─── OTP Codes ────────────────────────────────────────────────────────────
     await run(`
@@ -177,7 +189,13 @@ async function ensureSchema() {
             INDEX idx_rev_reviewer (reviewer_id),
             INDEX idx_rev_entity (target_entity_id)
         )
-    `, 'reviews table');
+    await run(`ALTER TABLE reviews ADD COLUMN target_entity_id VARCHAR(36) NULL`, 'add target_entity_id to reviews');
+    await run(`ALTER TABLE reviews ADD COLUMN is_disputed BOOLEAN DEFAULT FALSE`, 'add is_disputed to reviews');
+    await run(`ALTER TABLE reviews ADD COLUMN dispute_reason TEXT NULL`, 'add dispute_reason to reviews');
+    await run(`ALTER TABLE reviews ADD COLUMN sentiment ENUM('positive','neutral','negative') NULL`, 'add sentiment to reviews');
+    await run(`ALTER TABLE reviews ADD COLUMN interaction_type ENUM('general','transaction','service') DEFAULT 'general'`, 'add interaction_type to reviews');
+    await run(`ALTER TABLE reviews ADD COLUMN proof_url VARCHAR(255) NULL`, 'add proof_url to reviews');
+    await run(`ALTER TABLE reviews ADD COLUMN proof_tier ENUM('none','low','high') DEFAULT 'none'`, 'add proof_tier to reviews');
 
     // ─── Review Responses ──────────────────────────────────────────────────────
     await run(`
@@ -271,6 +289,9 @@ async function ensureSchema() {
             INDEX idx_af_actor (actor_id)
         )
     `, 'activity_feed table');
+
+    await run(`ALTER TABLE activity_feed ADD COLUMN target_entity_id VARCHAR(36) NULL`, 'add target_entity_id to activity_feed');
+    await run(`ALTER TABLE activity_feed ADD COLUMN action_data JSON NULL`, 'add action_data to activity_feed');
 
     // ─── Threads + Comments ────────────────────────────────────────────────────
     await run(`
