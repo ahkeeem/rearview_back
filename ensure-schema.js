@@ -299,6 +299,7 @@ async function ensureSchema() {
         CREATE TABLE IF NOT EXISTS threads (
             id INT AUTO_INCREMENT PRIMARY KEY,
             entity_id VARCHAR(36) NOT NULL,
+            review_id INT NULL,
             title VARCHAR(255) NOT NULL,
             author_id INT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -309,6 +310,7 @@ async function ensureSchema() {
         CREATE TABLE IF NOT EXISTS comments (
             id INT AUTO_INCREMENT PRIMARY KEY,
             thread_id INT NOT NULL,
+            parent_id INT NULL,
             author_id INT NOT NULL,
             content TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -428,6 +430,9 @@ async function ensureSchema() {
             INDEX idx_tt_loop (loop_id)
         )
     `, 'trade_transactions table');
+
+    await run(`ALTER TABLE threads ADD COLUMN review_id INT NULL`, 'add review_id to threads');
+    await run(`ALTER TABLE comments ADD COLUMN parent_id INT NULL`, 'add parent_id to comments');
 
     console.log('[Schema] ✅ Schema check complete.');
 }

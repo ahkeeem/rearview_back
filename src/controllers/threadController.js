@@ -66,10 +66,30 @@ const threadController = {
         }
     },
 
-    // Reply to an active discussion
+    getThreadByReviewId: async (req, res) => {
+        try {
+            const { reviewId } = req.params;
+            const [threads] = await pool.execute(
+                'SELECT id FROM threads WHERE review_id = ? LIMIT 1',
+                [reviewId]
+            );
+            
+            if (threads.length === 0) {
+                return res.status(404).json({ error: 'No discussion thread found for this review.' });
+            }
+            
+            res.status(200).json(threads[0]);
+        } catch (err) {
+            console.error('Error fetching thread by review ID:', err);
+            res.status(500).json({ error: 'Failed to find associated discussion.' });
+        }
+    },
+
+
+    // Reply to an active discussion (with nesting support)
     addComment: async (req, res) => {
         try {
-            const { content } = req.body;
+            const { content, parent_id } = req.body;
             const { threadId } = req.params;
             const author_id = req.user.userId || req.user.id;
 
@@ -78,8 +98,8 @@ const threadController = {
             }
 
             const [result] = await pool.execute(
-                'INSERT INTO comments (thread_id, author_id, content) VALUES (?, ?, ?)',
-                [threadId, author_id, content]
+                'INSERT INTO comments (thread_id, parent_id, author_id, content) VALUES (?, ?, ?, ?)',
+                [threadId, parent_id || null, author_id, content]
             );
 
             res.status(201).json({ message: 'Comment posted', commentId: result.insertId });
@@ -90,7 +110,7 @@ const threadController = {
         }
     },
 
-    // Dig down into a specific thread
+    // Dig down into a specific thread (Hierarchical)
     getComments: async (req, res) => {
         try {
             const { threadId } = req.params;
@@ -106,7 +126,7 @@ const threadController = {
                  return res.status(404).json({ error: 'Thread nullified or completely vanished.' });
             }
 
-            // Fetch Children
+            // Fetch All Comments for this thread
             const [comments] = await pool.execute(
                 `SELECT c.*, u.name as author_name, u.photo_url as author_avatar
                  FROM comments c
@@ -116,9 +136,26 @@ const threadController = {
                 [threadId]
             );
 
+            // Build hierarchical tree
+            const commentMap = {};
+            const tree = [];
+
+            comments.forEach(c => {
+                c.replies = [];
+                commentMap[c.id] = c;
+            });
+
+            comments.forEach(c => {
+                if (c.parent_id && commentMap[c.parent_id]) {
+                    commentMap[c.parent_id].replies.push(c);
+                } else {
+                    tree.push(c);
+                }
+            });
+
             res.status(200).json({
                  thread: threadInfo[0],
-                 comments: comments
+                 comments: tree
             });
 
         } catch (err) {
