@@ -2,7 +2,7 @@ const pool = require('../config/database');
 const paystack = require('../config/paystack');
 const paymentController = require('./paymentController');
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 const emailService = require('../services/emailService');
 
 const escrowController = {
