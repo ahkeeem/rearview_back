@@ -3,6 +3,40 @@ const paystack = require('../config/paystack');
 const crypto = require('crypto');
 const emailService = require('../services/emailService');
 
+/**
+ * Resolve the correct frontend base URL.
+ *
+ * Priority:
+ *   1. FRONTEND_URL env var (most explicit — set this on your hosting platform)
+ *   2. Origin / Referer header from the request (sent automatically by browsers)
+ *   3. CORS_ORIGIN env var (already set in your .env for local dev)
+ *
+ * WHY NOT req.get('host')?
+ *   The backend and frontend run on different ports / domains.
+ *   `req.get('host')` returns the BACKEND host, which is wrong.
+ *
+ * SAME-KEY NOTE:
+ *   Even though you share Paystack test keys between local and production,
+ *   the callback URL must still point to the correct environment's *frontend*.
+ *   That is purely determined by where the browser tab is — not which keys are used.
+ */
+function getFrontendUrl(req) {
+  if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL;
+  // Browser sends Origin on cross-origin XHR/fetch
+  const origin = req.get('origin');
+  if (origin) return origin;
+  // Fallback for same-origin or server-side requests
+  const referer = req.get('referer');
+  if (referer) {
+    try {
+      const u = new URL(referer);
+      return u.origin; // e.g. https://rearview.com
+    } catch (_) {}
+  }
+  // Last resort: CORS_ORIGIN already defined in .env
+  return process.env.CORS_ORIGIN || 'http://localhost:3000';
+}
+
 const paymentController = {
 
   // Get or create wallet for a user
@@ -105,7 +139,7 @@ const paymentController = {
 
       if (paystack.isMockMode()) {
         // MOCK: simulate Paystack response
-        const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const baseUrl = getFrontendUrl(req);
         const mockUrl = `${baseUrl}/dashboard/wallet?mock_payment=true&reference=${reference}&order=${escrow_order_id}`;
         
         // Store reference on order
@@ -127,12 +161,13 @@ const paymentController = {
       }
 
       // REAL: Call Paystack
+      const baseUrl = getFrontendUrl(req);
       const result = await paystack.request('POST', '/transaction/initialize', {
         email,
         amount: Math.round(order.amount * 100), // Paystack uses kobo
         reference,
         currency: 'NGN',
-        callback_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard/wallet?payment_callback=true`,
+        callback_url: `${baseUrl}/dashboard/wallet?payment_callback=true`,
         metadata: {
           escrow_order_id: order.id,
           order_ref: order.order_ref,
@@ -169,7 +204,7 @@ const paymentController = {
       const email = users[0].email;
 
       if (paystack.isMockMode()) {
-        const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const baseUrl = getFrontendUrl(req);
         const mockUrl = `${baseUrl}/dashboard/wallet?mock_payment=true&reference=${reference}&topup=true`;
         
         return res.json({
@@ -185,12 +220,13 @@ const paymentController = {
       }
 
       // REAL: Call Paystack
+      const baseUrl = getFrontendUrl(req);
       const result = await paystack.request('POST', '/transaction/initialize', {
         email,
-        amount: Math.round(parseFloat(amount) * 100), 
+        amount: Math.round(parseFloat(amount) * 100),
         reference,
         currency: 'NGN',
-        callback_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard/wallet?payment_callback=true`,
+        callback_url: `${baseUrl}/dashboard/wallet?payment_callback=true`,
         metadata: {
           type: 'topup',
           buyer_id: userId
