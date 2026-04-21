@@ -2,6 +2,7 @@ const pool = require('../config/database');
 const paystack = require('../config/paystack');
 const paymentController = require('./paymentController');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const emailService = require('../services/emailService');
 
 const escrowController = {
@@ -218,7 +219,7 @@ const escrowController = {
 
       // 5. Update order status
       await pool.execute(
-        'UPDATE escrow_orders SET status = "released", released_at = NOW() WHERE id = ?',
+        'UPDATE escrow_orders SET status = "completed", completed_at = NOW() WHERE id = ?',
         [order.id]
       );
 
@@ -268,6 +269,12 @@ const escrowController = {
       await pool.execute(
         'UPDATE escrow_orders SET status = "disputed", dispute_reason = ?, disputed_at = NOW() WHERE id = ?',
         [reason, id]
+      );
+
+      // Auto-log initial reason as the first dispute message
+      await pool.execute(
+        'INSERT INTO dispute_messages (escrow_order_id, sender_id, message) VALUES (?, ?, ?)',
+        [id, userId, `[INITIAL DISPUTE REASON] ${reason}`]
       );
 
       // ── Notify BOTH parties that dispute has been opened ──
@@ -362,6 +369,232 @@ const escrowController = {
     } catch (err) {
       console.error('Resolve dispute error:', err);
       res.status(500).json({ error: 'Failed to resolve dispute' });
+    }
+  },
+
+  // POST /escrow/pay-link/:slug — Public/Guest checkout for Trust Links
+  payTrustLink: async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const { guest_email, guest_name } = req.body;
+
+      if (!guest_email || !guest_name) {
+        return res.status(400).json({ error: 'Email and name are required' });
+      }
+
+      // 1. Verify Trust Link
+      const [links] = await pool.execute(
+        'SELECT * FROM trust_links WHERE url_slug = ? AND is_active = 1',
+        [slug]
+      );
+
+      if (links.length === 0) {
+        return res.status(404).json({ error: 'Trust link not found or inactive' });
+      }
+
+      const link = links[0];
+      const parsedAmount = parseFloat(link.amount);
+
+      // 2. Resolve or Create Buyer Account
+      let buyerId;
+      const [existingUsers] = await pool.execute('SELECT id FROM users WHERE email = ?', [guest_email]);
+
+      if (existingUsers.length > 0) {
+        buyerId = existingUsers[0].id;
+      } else {
+        // Auto-register guest
+        const randomPassword = crypto.randomBytes(8).toString('hex');
+        const hashedPassword = await bcrypt.hash(randomPassword, 10);
+        
+        const [insertRes] = await pool.execute(
+          `INSERT INTO users (name, email, password, role, verification_level) 
+           VALUES (?, ?, ?, 'user', 'none')`,
+          [guest_name, guest_email, hashedPassword]
+        );
+        buyerId = insertRes.insertId;
+
+        // Optionally, an email could be sent here with their temporary password
+      }
+
+      // 3. Create Escrow Order
+      const commissionRate = paystack.COMMISSION_RATE;
+      const commissionAmount = Math.round(parsedAmount * commissionRate * 100) / 100;
+      const vendorAmount = parsedAmount - commissionAmount;
+      const orderRef = \`ESC-\${Date.now().toString(36).toUpperCase()}-\${crypto.randomBytes(3).toString('hex').toUpperCase()}\`;
+
+      const [orderRes] = await pool.execute(
+        `INSERT INTO escrow_orders (order_ref, buyer_id, vendor_id, amount, commission_rate, commission_amount, vendor_amount, title, description)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderRef, buyerId, link.vendor_id, parsedAmount, commissionRate, commissionAmount, vendorAmount, link.title, 'Created via Trust Link: ' + slug]
+      );
+      
+      const escrowOrderId = orderRes.insertId;
+      const reference = \`ref_escrow_\${orderRef}_\${Date.now()}\`;
+
+      // 4. Initialize Paystack (Similar to paymentController logic)
+      let authorizationUrl;
+
+      if (paystack.isMockMode()) {
+        const baseUrl = process.env.FRONTEND_URL || req.headers.origin || process.env.CORS_ORIGIN || 'http://localhost:3000';
+        authorizationUrl = \`\${baseUrl}/public/checkout-success?mock_payment=true&reference=\${reference}&order=\${escrowOrderId}\`;
+        
+        await pool.execute('UPDATE escrow_orders SET payment_reference = ? WHERE id = ?', [reference, escrowOrderId]);
+      } else {
+        const baseUrl = process.env.FRONTEND_URL || req.headers.origin || process.env.CORS_ORIGIN;
+        const result = await paystack.request('POST', '/transaction/initialize', {
+          email: guest_email,
+          amount: Math.round(parsedAmount * 100),
+          reference,
+          currency: 'NGN',
+          callback_url: \`\${baseUrl}/public/checkout-success?payment_callback=true\`,
+          metadata: {
+            escrow_order_id: escrowOrderId,
+            order_ref: orderRef,
+            buyer_id: buyerId
+          }
+        });
+
+        if (result.status) {
+          await pool.execute('UPDATE escrow_orders SET payment_reference = ? WHERE id = ?', [reference, escrowOrderId]);
+          authorizationUrl = result.data.authorization_url;
+        } else {
+          return res.status(500).json({ error: 'Failed to initialize payment gateway' });
+        }
+      }
+
+      res.status(200).json({
+        message: 'Checkout initialized',
+        authorization_url: authorizationUrl,
+        reference: reference
+      });
+
+    } catch (err) {
+      console.error('Trust Link checkout error:', err);
+      res.status(500).json({ error: 'Failed to process checkout' });
+    }
+  },
+
+  // PUT /escrow/orders/:id/deliver — Vendor marks order as delivered (Minimal Logistics)
+  markDelivered: async (req, res) => {
+    try {
+      const vendorId = req.user.userId || req.user.id;
+      const { id } = req.params;
+
+      const [orders] = await pool.execute(
+        'SELECT * FROM escrow_orders WHERE id = ? AND vendor_id = ? AND status = "funded"',
+        [id, vendorId]
+      );
+
+      if (orders.length === 0) {
+        return res.status(404).json({ error: 'Funded escrow order not found or you are not the vendor' });
+      }
+
+      const order = orders[0];
+
+      await pool.execute(
+        'UPDATE escrow_orders SET status = "delivered", delivered_at = NOW() WHERE id = ?',
+        [order.id]
+      );
+
+      // Notify buyer that it's delivered and prompt them to confirm via email link
+      const [buyerRows] = await pool.execute('SELECT name, email FROM users WHERE id = ?', [order.buyer_id]);
+      if (buyerRows[0]) {
+        emailService.sendEscrowNotification(
+          buyerRows[0].email, buyerRows[0].name,
+          'item_delivered_prompt',
+          { title: order.title, order_ref: order.order_ref, amount: order.amount }
+        ).catch(() => {});
+      }
+
+      res.json({ message: 'Order marked as delivered. Buyer has been notified to release funds.' });
+    } catch (err) {
+      console.error('Mark delivered error:', err);
+      res.status(500).json({ error: 'Failed to mark as delivered' });
+    }
+  },
+
+  // GET /escrow/orders/:id/messages — Fetch dispute messages
+  getDisputeMessages: async (req, res) => {
+    try {
+      const userId = req.user.userId || req.user.id;
+      const isAdmin = req.user.role === 'admin';
+      const { id } = req.params;
+
+      // Verify access to order
+      let query = 'SELECT * FROM escrow_orders WHERE id = ?';
+      let params = [id];
+      if (!isAdmin) {
+        query += ' AND (buyer_id = ? OR vendor_id = ?)';
+        params.push(userId, userId);
+      }
+
+      const [orders] = await pool.execute(query, params);
+      if (orders.length === 0) {
+        return res.status(403).json({ error: 'Not authorized or order not found' });
+      }
+
+      const [messages] = await pool.execute(
+        `SELECT dm.*, u.name as sender_name, u.role as sender_role, u.photo_url as sender_photo 
+         FROM dispute_messages dm
+         JOIN users u ON dm.sender_id = u.id
+         WHERE dm.escrow_order_id = ?
+         ORDER BY dm.created_at ASC`,
+        [id]
+      );
+
+      res.json(messages);
+    } catch (err) {
+      console.error('Get dispute messages error:', err);
+      res.status(500).json({ error: 'Failed to load messages' });
+    }
+  },
+
+  // POST /escrow/orders/:id/messages — Add a message/evidence to dispute
+  addDisputeMessage: async (req, res) => {
+    try {
+      const userId = req.user.userId || req.user.id;
+      const isAdmin = req.user.role === 'admin';
+      const { id } = req.params;
+      const { message, attachment_url } = req.body;
+
+      if (!message && !attachment_url) {
+        return res.status(400).json({ error: 'Message or attachment required' });
+      }
+
+      // Verify access to order
+      let query = 'SELECT * FROM escrow_orders WHERE id = ?';
+      let params = [id];
+      if (!isAdmin) {
+        query += ' AND (buyer_id = ? OR vendor_id = ?)';
+        params.push(userId, userId);
+      }
+
+      const [orders] = await pool.execute(query, params);
+      if (orders.length === 0) {
+        return res.status(403).json({ error: 'Not authorized or order not found' });
+      }
+
+      if (orders[0].status !== 'disputed') {
+        return res.status(400).json({ error: 'Order is not in a disputed state' });
+      }
+
+      const [insertRes] = await pool.execute(
+        'INSERT INTO dispute_messages (escrow_order_id, sender_id, message, attachment_url) VALUES (?, ?, ?, ?)',
+        [id, userId, message || null, attachment_url || null]
+      );
+      
+      const [newMsg] = await pool.execute(
+        `SELECT dm.*, u.name as sender_name, u.role as sender_role, u.photo_url as sender_photo 
+         FROM dispute_messages dm
+         JOIN users u ON dm.sender_id = u.id
+         WHERE dm.id = ?`,
+        [insertRes.insertId]
+      );
+
+      res.status(201).json(newMsg[0]);
+    } catch (err) {
+      console.error('Add dispute message error:', err);
+      res.status(500).json({ error: 'Failed to post message' });
     }
   }
 };

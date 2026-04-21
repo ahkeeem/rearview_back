@@ -21,6 +21,7 @@ const threadRoutes = require('./routes/threadRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const escrowRoutes = require('./routes/escrowRoutes');
 const barterRoutes = require('./routes/barterRoutes');
+const trustLinkRoutes = require('./routes/trustLinkRoutes');
 
 const app = express();
 
@@ -86,6 +87,7 @@ app.use('/api/threads', threadRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/escrow', escrowRoutes);
 app.use('/api/barter', barterRoutes);
+app.use('/api/trust-links', trustLinkRoutes);
 
 // Root route with API documentation
 app.get('/', (req, res) => {

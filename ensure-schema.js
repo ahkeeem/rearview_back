@@ -381,6 +381,18 @@ async function ensureSchema() {
     `, 'escrow_orders table');
 
     await run(`
+        CREATE TABLE IF NOT EXISTS dispute_messages (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            escrow_order_id INT NOT NULL,
+            sender_id INT NOT NULL,
+            message TEXT NULL,
+            attachment_url VARCHAR(255) NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_dm_order (escrow_order_id)
+        )
+    `, 'dispute_messages table');
+
+    await run(`
         CREATE TABLE IF NOT EXISTS payouts (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT NOT NULL,
@@ -406,6 +418,22 @@ async function ensureSchema() {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     `, 'webhook_events table');
+
+    // ─── Trust Links (Service Escrow Links) ────────────────────────────────────
+    await run(`
+        CREATE TABLE IF NOT EXISTS trust_links (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            vendor_id INT NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            description TEXT NULL,
+            amount DECIMAL(15,2) NOT NULL,
+            url_slug VARCHAR(50) UNIQUE NOT NULL,
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_tl_vendor (vendor_id),
+            INDEX idx_tl_slug (url_slug)
+        )
+    `, 'trust_links table');
 
     // ─── Barter Engine ──────────────────────────────────────────────────────────
     await run(`

@@ -32,6 +32,8 @@ router.get('/disputes', verifyAdmin, async (req, res) => {
 });
 
 router.put('/disputes/:id/resolve', verifyAdmin, escrowController.resolveDispute);
+router.get('/disputes/:id/messages', verifyAdmin, escrowController.getDisputeMessages);
+router.post('/disputes/:id/messages', verifyAdmin, escrowController.addDisputeMessage);
 
 router.get('/escrow/all', verifyAdmin, async (req, res) => {
   try {

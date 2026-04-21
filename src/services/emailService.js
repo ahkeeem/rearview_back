@@ -73,6 +73,17 @@ const emailService = {
                     </p>
                 `
             },
+            item_delivered_prompt: {
+                subject: `📦 Item Delivered — Please release funds for ${data.title || 'Your Order'}`,
+                heading: 'Your Vendor Marked this Order as Delivered',
+                body: `
+                    <p>The vendor has marked your escrow order <strong>${data.title}</strong> as delivered or completed.</p>
+                    <p style="background:#fff3e0;padding:12px;border-radius:8px;color:#e65100;">
+                        <strong>Action required:</strong> Please inspect your product/service. If everything is in order, log into your RearView dashboard and click "Release Funds" to pay the vendor. 
+                        If there is an issue, you may open a dispute.
+                    </p>
+                `
+            },
             delivery_confirmed: {
                 subject: `💰 Payment Released — ₦${Number(data.vendor_amount || 0).toLocaleString()} is in your wallet`,
                 heading: 'Funds Released to You',
