@@ -420,7 +420,7 @@ const escrowController = {
       const commissionRate = paystack.COMMISSION_RATE;
       const commissionAmount = Math.round(parsedAmount * commissionRate * 100) / 100;
       const vendorAmount = parsedAmount - commissionAmount;
-      const orderRef = \`ESC-\${Date.now().toString(36).toUpperCase()}-\${crypto.randomBytes(3).toString('hex').toUpperCase()}\`;
+      const orderRef = `ESC-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
       const [orderRes] = await pool.execute(
         `INSERT INTO escrow_orders (order_ref, buyer_id, vendor_id, amount, commission_rate, commission_amount, vendor_amount, title, description)
@@ -429,14 +429,14 @@ const escrowController = {
       );
       
       const escrowOrderId = orderRes.insertId;
-      const reference = \`ref_escrow_\${orderRef}_\${Date.now()}\`;
+      const reference = `ref_escrow_${orderRef}_${Date.now()}`;
 
       // 4. Initialize Paystack (Similar to paymentController logic)
       let authorizationUrl;
 
       if (paystack.isMockMode()) {
         const baseUrl = process.env.FRONTEND_URL || req.headers.origin || process.env.CORS_ORIGIN || 'http://localhost:3000';
-        authorizationUrl = \`\${baseUrl}/public/checkout-success?mock_payment=true&reference=\${reference}&order=\${escrowOrderId}\`;
+        authorizationUrl = `${baseUrl}/public/checkout-success?mock_payment=true&reference=${reference}&order=${escrowOrderId}`;
         
         await pool.execute('UPDATE escrow_orders SET payment_reference = ? WHERE id = ?', [reference, escrowOrderId]);
       } else {
@@ -446,7 +446,7 @@ const escrowController = {
           amount: Math.round(parsedAmount * 100),
           reference,
           currency: 'NGN',
-          callback_url: \`\${baseUrl}/public/checkout-success?payment_callback=true\`,
+          callback_url: `${baseUrl}/public/checkout-success?payment_callback=true`,
           metadata: {
             escrow_order_id: escrowOrderId,
             order_ref: orderRef,
