@@ -9,7 +9,7 @@ const transporter = nodemailer.createTransport({
         pass: process.env.SMTP_PASS
     },
     tls: {
-        rejectUnauthorized: false // Fixes silent SMTP failures in cloud environments
+        rejectUnauthorized: process.env.NODE_ENV === 'production' // Fixes silent SMTP failures in cloud environments, but secure in production
     }
 });
 
@@ -154,6 +154,52 @@ const emailService = {
         } catch (err) {
             console.error(`❌ Escrow email (${context}) failed:`, err.message);
             throw err;
+        }
+    },
+
+    // ── Guest Account Welcome (Trust Link Auto-Registration) ─────────────────
+    sendGuestWelcome: async (toEmail, toName, tempPassword, orderTitle) => {
+        const frontendUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'http://localhost:3000';
+        const html = `
+            <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9f9f9;padding:20px;border-radius:12px;">
+                <div style="background:linear-gradient(135deg,#1e3c72,#2a5298);padding:24px;border-radius:8px 8px 0 0;margin-bottom:0;">
+                    <h1 style="color:white;margin:0;font-size:22px;">🛡️ Welcome to RearView</h1>
+                </div>
+                <div style="background:white;padding:28px;border-radius:0 0 8px 8px;border:1px solid #e0e0e0;border-top:none;">
+                    <h2 style="color:#1e3c72;margin-top:0;">Your Account Has Been Created</h2>
+                    <p>Hi ${toName || 'there'},</p>
+                    <p>An account has been created for you on RearView as part of your escrow-protected purchase${orderTitle ? ` for <strong>${orderTitle}</strong>` : ''}.</p>
+                    <table style="width:100%;border-collapse:collapse;margin:20px 0;">
+                        <tr><td style="padding:8px 0;color:#666;">Email</td><td style="padding:8px 0;font-weight:bold;">${toEmail}</td></tr>
+                        <tr><td style="padding:8px 0;color:#666;">Temporary Password</td><td style="padding:8px 0;font-family:monospace;font-weight:bold;color:#1e3c72;font-size:16px;">${tempPassword}</td></tr>
+                    </table>
+                    <p style="background:#fff3e0;padding:12px;border-radius:8px;color:#e65100;">
+                        <strong>Important:</strong> Please log in and change your password immediately in Settings → Security.
+                    </p>
+                    <div style="text-align:center;margin:24px 0;">
+                        <a href="${frontendUrl}/login" style="background:#1e3c72;color:white;padding:12px 32px;text-decoration:none;border-radius:8px;font-weight:bold;">Log In to RearView</a>
+                    </div>
+                    <p>Your payment is protected by our escrow system. You can track your order status from your dashboard.</p>
+                    <p style="color:#888;font-size:12px;margin-top:32px;border-top:1px solid #eee;padding-top:16px;">
+                        This is an automated notification from RearView. If you did not make this purchase, please contact support.
+                    </p>
+                </div>
+            </div>
+        `;
+
+        try {
+            await transporter.verify();
+            await transporter.sendMail({
+                from: process.env.FROM_EMAIL || '"RearView" <noreply@rearview.app>',
+                to: toEmail,
+                subject: '🔑 Your RearView Account — Temporary Login Credentials',
+                html
+            });
+            return true;
+        } catch (err) {
+            console.error('❌ Guest welcome email failed:', err.message);
+            // Non-critical — don't throw, the payment should still proceed
+            return false;
         }
     }
 };

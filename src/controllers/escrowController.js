@@ -160,6 +160,7 @@ const escrowController = {
 
   // PUT /escrow/orders/:id/confirm — buyer confirms delivery → release funds
   confirmDelivery: async (req, res) => {
+    let conn;
     try {
       const userId = req.user.userId || req.user.id;
       const { id } = req.params;
@@ -179,20 +180,24 @@ const escrowController = {
       const buyerWallet = await paymentController.getOrCreateWallet(order.buyer_id);
       const vendorWallet = await paymentController.getOrCreateWallet(order.vendor_id);
 
+      // ── All financial mutations inside a single transaction ──
+      conn = await pool.getConnection();
+      await conn.beginTransaction();
+
       // 1. Release escrow: deduct from buyer's escrow_locked
-      await pool.execute(
+      await conn.execute(
         'UPDATE wallets SET escrow_locked = escrow_locked - ? WHERE id = ?',
         [order.amount, buyerWallet.id]
       );
 
       // 2. Credit vendor wallet with vendor_amount
-      await pool.execute(
+      await conn.execute(
         'UPDATE wallets SET available_balance = available_balance + ? WHERE id = ?',
         [order.vendor_amount, vendorWallet.id]
       );
 
       // 3. Record release transaction
-      await pool.execute(
+      await conn.execute(
         `INSERT INTO transactions (reference, type, amount, debit_wallet_id, credit_wallet_id, escrow_order_id, description, status)
          VALUES (?, 'escrow_release', ?, ?, ?, ?, ?, 'completed')`,
         [`release_${order.order_ref}_${Date.now()}`, order.vendor_amount, buyerWallet.id, vendorWallet.id, order.id,
@@ -201,14 +206,14 @@ const escrowController = {
 
       // 4. Record commission
       if (order.commission_amount > 0) {
-        // Platform wallet = user 1's wallet
-        const [platformWallets] = await pool.execute('SELECT id FROM wallets WHERE user_id = 1');
+        const platformUserId = parseInt(process.env.PLATFORM_WALLET_USER_ID || '1');
+        const [platformWallets] = await conn.execute('SELECT id FROM wallets WHERE user_id = ?', [platformUserId]);
         if (platformWallets.length > 0) {
-          await pool.execute(
+          await conn.execute(
             'UPDATE wallets SET available_balance = available_balance + ? WHERE id = ?',
             [order.commission_amount, platformWallets[0].id]
           );
-          await pool.execute(
+          await conn.execute(
             `INSERT INTO transactions (reference, type, amount, credit_wallet_id, escrow_order_id, description, status)
              VALUES (?, 'commission', ?, ?, ?, ?, 'completed')`,
             [`comm_${order.order_ref}`, order.commission_amount, platformWallets[0].id, order.id,
@@ -218,14 +223,15 @@ const escrowController = {
       }
 
       // 5. Update order status
-      await pool.execute(
+      await conn.execute(
         'UPDATE escrow_orders SET status = "completed", completed_at = NOW() WHERE id = ?',
         [order.id]
       );
 
+      await conn.commit();
       console.log(`✅ Escrow released: ${order.order_ref} — ₦${order.vendor_amount} to vendor`);
 
-      // ── Notify vendor that payment has been released ──
+      // ── Notify vendor that payment has been released (non-blocking, after commit) ──
       const [vendorRows] = await pool.execute('SELECT name, email FROM users WHERE id = ?', [order.vendor_id]);
       if (vendorRows[0]) {
         emailService.sendEscrowNotification(
@@ -241,8 +247,11 @@ const escrowController = {
         commission: parseFloat(order.commission_amount)
       });
     } catch (err) {
+      if (conn) await conn.rollback().catch(() => {});
       console.error('Confirm delivery error:', err);
       res.status(500).json({ error: 'Failed to confirm delivery' });
+    } finally {
+      if (conn) conn.release();
     }
   },
 
@@ -297,8 +306,9 @@ const escrowController = {
 
   // PUT /escrow/orders/:id/resolve — admin resolves dispute
   resolveDispute: async (req, res) => {
+    let conn;
     try {
-      const adminId = req.user.userId || req.user.id;
+      const adminId = req.admin?.id || req.user?.userId || req.user?.id;
       const { id } = req.params;
       const { resolution } = req.body; // 'release' or 'refund'
 
@@ -319,43 +329,49 @@ const escrowController = {
       const buyerWallet = await paymentController.getOrCreateWallet(order.buyer_id);
       const vendorWallet = await paymentController.getOrCreateWallet(order.vendor_id);
 
+      // ── All financial mutations inside a single transaction ──
+      conn = await pool.getConnection();
+      await conn.beginTransaction();
+
       if (resolution === 'release') {
         // Release to vendor (same as confirm)
-        await pool.execute('UPDATE wallets SET escrow_locked = escrow_locked - ? WHERE id = ?', [order.amount, buyerWallet.id]);
-        await pool.execute('UPDATE wallets SET available_balance = available_balance + ? WHERE id = ?', [order.vendor_amount, vendorWallet.id]);
+        await conn.execute('UPDATE wallets SET escrow_locked = escrow_locked - ? WHERE id = ?', [order.amount, buyerWallet.id]);
+        await conn.execute('UPDATE wallets SET available_balance = available_balance + ? WHERE id = ?', [order.vendor_amount, vendorWallet.id]);
         
-        await pool.execute(
+        await conn.execute(
           `INSERT INTO transactions (reference, type, amount, debit_wallet_id, credit_wallet_id, escrow_order_id, description, status)
            VALUES (?, 'escrow_release', ?, ?, ?, ?, ?, 'completed')`,
           [`resolve_release_${order.order_ref}`, order.vendor_amount, buyerWallet.id, vendorWallet.id, order.id,
            `Dispute resolved: released to vendor`]
         );
 
-        await pool.execute(
+        await conn.execute(
           'UPDATE escrow_orders SET status = "released", dispute_resolved_by = ?, resolved_at = NOW() WHERE id = ?',
           [adminId, id]
         );
       } else {
         // Refund to buyer
-        await pool.execute('UPDATE wallets SET escrow_locked = escrow_locked - ?, available_balance = available_balance + ? WHERE id = ?',
+        await conn.execute('UPDATE wallets SET escrow_locked = escrow_locked - ?, available_balance = available_balance + ? WHERE id = ?',
           [order.amount, order.amount, buyerWallet.id]);
         
-        await pool.execute(
+        await conn.execute(
           `INSERT INTO transactions (reference, type, amount, credit_wallet_id, escrow_order_id, description, status)
            VALUES (?, 'escrow_refund', ?, ?, ?, ?, 'completed')`,
           [`resolve_refund_${order.order_ref}`, order.amount, buyerWallet.id, order.id,
            `Dispute resolved: refunded to buyer`]
         );
 
-        await pool.execute(
+        await conn.execute(
           'UPDATE escrow_orders SET status = "refunded", dispute_resolved_by = ?, resolved_at = NOW() WHERE id = ?',
           [adminId, id]
         );
       }
 
+      await conn.commit();
+
       res.json({ message: `Dispute resolved: ${resolution === 'release' ? 'funds released to vendor' : 'funds refunded to buyer'}` });
 
-      // ── Notify both parties of resolution (non-blocking, after response sent) ──
+      // ── Notify both parties of resolution (non-blocking, after commit) ──
       const [parties] = await pool.execute(
         'SELECT u.name, u.email FROM users u WHERE u.id IN (?, ?)',
         [order.buyer_id, order.vendor_id]
@@ -367,8 +383,11 @@ const escrowController = {
         }).catch(() => {});
       });
     } catch (err) {
+      if (conn) await conn.rollback().catch(() => {});
       console.error('Resolve dispute error:', err);
       res.status(500).json({ error: 'Failed to resolve dispute' });
+    } finally {
+      if (conn) conn.release();
     }
   },
 
@@ -413,7 +432,9 @@ const escrowController = {
         );
         buyerId = insertRes.insertId;
 
-        // Optionally, an email could be sent here with their temporary password
+        // Send temporary credentials to the guest so they can log in
+        emailService.sendGuestWelcome(guest_email, guest_name, randomPassword, link.title)
+          .catch(() => {}); // non-blocking — payment should proceed even if email fails
       }
 
       // 3. Create Escrow Order

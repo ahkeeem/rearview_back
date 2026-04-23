@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const bodyParser = require('body-parser');
 const { securityHeaders, corsOptions } = require('./middlewares/security');
 const { apiLimiter } = require('./middlewares/rateLimiter');
 const logger = require('./utils/logger');
@@ -34,9 +33,9 @@ app.use(securityHeaders);
 // CORS configuration
 app.use(cors(corsOptions));
 
-// Body parser
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+// Body parser (using Express built-in — bodyParser is deprecated)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Request logging
 app.use(logger.requestLogger);
@@ -61,14 +60,7 @@ app.use('/uploads', (req, res, next) => {
   next();
 }, express.static(path.join(__dirname, '../uploads')));
 
-// Health Check
-app.get('/health', (req, res) => {
-    res.status(200).json({ 
-        status: 'OK', 
-        timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV 
-    });
-});
+
 
 // Routes
 app.use('/api/users', userRoutes);
@@ -140,11 +132,3 @@ app.use(notFoundHandler);
 app.use(globalErrorHandler);
 
 module.exports = app;
-
-
-
-
-
-
-
-

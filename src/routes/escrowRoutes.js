@@ -3,6 +3,7 @@ const router = express.Router();
 const escrowController = require('../controllers/escrowController');
 const { verifyToken } = require('../middlewares/authMiddleware');
 const { requireVerified } = require('../middlewares/verificationGate');
+const verifyAdmin = require('../middlewares/adminMiddleware');
 
 // Public route for Trust Links checkout
 router.post('/pay-link/:slug', escrowController.payTrustLink);
@@ -16,6 +17,6 @@ router.put('/orders/:id/deliver', verifyToken, requireVerified, escrowController
 router.put('/orders/:id/dispute', verifyToken, requireVerified, escrowController.disputeOrder);
 router.get('/orders/:id/messages', verifyToken, requireVerified, escrowController.getDisputeMessages);
 router.post('/orders/:id/messages', verifyToken, requireVerified, escrowController.addDisputeMessage);
-router.put('/orders/:id/resolve', verifyToken, requireVerified, escrowController.resolveDispute);
+router.put('/orders/:id/resolve', verifyToken, verifyAdmin, escrowController.resolveDispute);
 
 module.exports = router;

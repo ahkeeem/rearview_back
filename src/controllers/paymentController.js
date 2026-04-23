@@ -270,111 +270,131 @@ const paymentController = {
 
   // Process confirmed payment → credit escrow OR wallet
   processSuccessfulPayment: async (reference) => {
-    if (reference.startsWith('ref_topup_')) {
-      // It's a direct wallet top-up!
-      // Format: ref_topup_amt_{amount}_{timestamp}_{userId}
-      const parts = reference.split('_');
-      const userId = parseInt(parts[parts.length - 1]);
-      const wallet = await paymentController.getOrCreateWallet(userId);
+    let conn;
+    try {
+      if (reference.startsWith('ref_topup_')) {
+        // It's a direct wallet top-up!
+        // Format: ref_topup_amt_{amount}_{timestamp}_{userId}
+        const parts = reference.split('_');
+        const userId = parseInt(parts[parts.length - 1]);
+        const wallet = await paymentController.getOrCreateWallet(userId);
 
-      // Verify the transaction wasn't already processed
-      const [existing] = await pool.execute('SELECT id FROM transactions WHERE reference = ?', [`dep_${reference}`]);
-      if (existing.length > 0) return;
+        // Verify the transaction wasn't already processed (idempotency)
+        const [existing] = await pool.execute('SELECT id FROM transactions WHERE reference = ?', [`dep_${reference}`]);
+        if (existing.length > 0) return;
 
-      // Determine the credited amount
-      let amount = 0;
-      if (paystack.isMockMode()) {
-        // In mock mode, parse amount from the reference string or use a fixed test value
-        const storedAmount = reference.match(/amt_(\d+)_/);
-        amount = storedAmount ? parseInt(storedAmount[1]) : 1000;
-      } else {
-        // In real mode, always confirm the amount from Paystack
-        const verify = await paystack.request('GET', `/transaction/verify/${reference}`);
-        if (!verify.status || verify.data.status !== 'success') {
-          console.error('Paystack verify failed for top-up:', verify);
-          return;
+        // Determine the credited amount
+        let amount = 0;
+        if (paystack.isMockMode()) {
+          // In mock mode, parse amount from the reference string or use a fixed test value
+          const storedAmount = reference.match(/amt_(\d+)_/);
+          amount = storedAmount ? parseInt(storedAmount[1]) : 1000;
+        } else {
+          // In real mode, always confirm the amount from Paystack
+          const verify = await paystack.request('GET', `/transaction/verify/${reference}`);
+          if (!verify.status || verify.data.status !== 'success') {
+            console.error('Paystack verify failed for top-up:', verify);
+            return;
+          }
+          amount = verify.data.amount / 100; // convert kobo → naira
         }
-        amount = verify.data.amount / 100; // convert kobo → naira
+        
+        // ── Top-up mutations inside a single transaction ──
+        conn = await pool.getConnection();
+        await conn.beginTransaction();
+
+        // Credit wallet
+        await conn.execute(
+          'UPDATE wallets SET available_balance = available_balance + ? WHERE id = ?',
+          [amount, wallet.id]
+        );
+        
+        // Record transaction
+        await conn.execute(
+          `INSERT INTO transactions (reference, type, amount, credit_wallet_id, description, status)
+           VALUES (?, 'deposit', ?, ?, ?, 'completed')`,
+          [`dep_${reference}`, amount, wallet.id, `Wallet top-up via Paystack`]
+        );
+
+        await conn.commit();
+        console.log(`✅ Wallet Funded: User ${userId} — ₦${amount}`);
+        return;
       }
-      
-      // Credit wallet
-      await pool.execute(
-        'UPDATE wallets SET available_balance = available_balance + ? WHERE id = ?',
-        [amount, wallet.id]
+
+      // It's an escrow payment
+      const [orders] = await pool.execute(
+        'SELECT * FROM escrow_orders WHERE payment_reference = ? AND status = "pending"',
+        [reference]
       );
-      
-      // Record transaction
-      await pool.execute(
-        `INSERT INTO transactions (reference, type, amount, credit_wallet_id, description, status)
-         VALUES (?, 'deposit', ?, ?, ?, 'completed')`,
-        [`dep_${reference}`, amount, wallet.id, `Wallet top-up via Paystack`]
+
+      if (orders.length === 0) return; // Already processed or not found
+
+      const order = orders[0];
+
+      // Get/create wallets
+      const buyerWallet = await paymentController.getOrCreateWallet(order.buyer_id);
+      const vendorWallet = await paymentController.getOrCreateWallet(order.vendor_id);
+
+      const txnRef = `txn_escrow_lock_${Date.now()}`;
+
+      // ── Escrow funding mutations inside a single transaction ──
+      conn = await pool.getConnection();
+      await conn.beginTransaction();
+
+      // 1. Record deposit into buyer's wallet (from Paystack)
+      await conn.execute(
+        `INSERT INTO transactions (reference, type, amount, credit_wallet_id, escrow_order_id, description, status)
+         VALUES (?, 'deposit', ?, ?, ?, ?, 'completed')`,
+        [`dep_${reference}`, order.amount, buyerWallet.id, order.id, `Payment for order ${order.order_ref}`]
       );
-      console.log(`✅ Wallet Funded: User ${userId} — ₦${amount}`);
-      return;
+
+      // 2. Lock funds in escrow (debit buyer → escrow)
+      await conn.execute(
+        `INSERT INTO transactions (reference, type, amount, debit_wallet_id, escrow_order_id, description, status)
+         VALUES (?, 'escrow_lock', ?, ?, ?, ?, 'completed')`,
+        [txnRef, order.amount, buyerWallet.id, order.id, `Escrow lock for order ${order.order_ref}`]
+      );
+
+      // 3. Update buyer wallet: increase escrow_locked
+      await conn.execute(
+        'UPDATE wallets SET escrow_locked = escrow_locked + ? WHERE id = ?',
+        [order.amount, buyerWallet.id]
+      );
+
+      // 4. Mark escrow order as funded
+      await conn.execute(
+        'UPDATE escrow_orders SET status = "funded", funded_at = NOW() WHERE id = ?',
+        [order.id]
+      );
+
+      await conn.commit();
+
+      // 5. Notify vendor that funds are locked and work can begin (non-blocking, after commit)
+      const [vendorRows] = await pool.execute(
+        'SELECT u.name, u.email, buyer.name as buyer_name FROM users u, users buyer WHERE u.id = ? AND buyer.id = ?',
+        [order.vendor_id, order.buyer_id]
+      );
+      if (vendorRows[0]) {
+        emailService.sendEscrowNotification(
+          vendorRows[0].email, vendorRows[0].name,
+          'order_funded',
+          {
+            title: order.title,
+            order_ref: order.order_ref,
+            vendor_amount: order.vendor_amount,
+            buyer_name: vendorRows[0].buyer_name
+          }
+        ).catch(() => {}); // non-blocking
+      }
+
+      console.log(`✅ Escrow funded: Order ${order.order_ref} — ₦${order.amount}`);
+    } catch (err) {
+      if (conn) await conn.rollback().catch(() => {});
+      console.error('processSuccessfulPayment error:', err);
+      throw err; // Re-throw so callers know the payment processing failed
+    } finally {
+      if (conn) conn.release();
     }
-
-    // It's an escrow payment
-    const [orders] = await pool.execute
-(
-      'SELECT * FROM escrow_orders WHERE payment_reference = ? AND status = "pending"',
-      [reference]
-    );
-
-    if (orders.length === 0) return; // Already processed or not found
-
-    const order = orders[0];
-
-    // Get/create wallets
-    const buyerWallet = await paymentController.getOrCreateWallet(order.buyer_id);
-    const vendorWallet = await paymentController.getOrCreateWallet(order.vendor_id);
-
-    const txnRef = `txn_escrow_lock_${Date.now()}`;
-
-    // 1. Record deposit into buyer's wallet (from Paystack)
-    await pool.execute(
-      `INSERT INTO transactions (reference, type, amount, credit_wallet_id, escrow_order_id, description, status)
-       VALUES (?, 'deposit', ?, ?, ?, ?, 'completed')`,
-      [`dep_${reference}`, order.amount, buyerWallet.id, order.id, `Payment for order ${order.order_ref}`]
-    );
-
-    // 2. Lock funds in escrow (debit buyer → escrow)
-    await pool.execute(
-      `INSERT INTO transactions (reference, type, amount, debit_wallet_id, escrow_order_id, description, status)
-       VALUES (?, 'escrow_lock', ?, ?, ?, ?, 'completed')`,
-      [txnRef, order.amount, buyerWallet.id, order.id, `Escrow lock for order ${order.order_ref}`]
-    );
-
-    // 3. Update buyer wallet: increase escrow_locked
-    await pool.execute(
-      'UPDATE wallets SET escrow_locked = escrow_locked + ? WHERE id = ?',
-      [order.amount, buyerWallet.id]
-    );
-
-    // 4. Mark escrow order as funded
-    await pool.execute(
-      'UPDATE escrow_orders SET status = "funded", funded_at = NOW() WHERE id = ?',
-      [order.id]
-    );
-
-    // 5. Notify vendor that funds are locked and work can begin
-    const [vendorRows] = await pool.execute(
-      'SELECT u.name, u.email, buyer.name as buyer_name FROM users u, users buyer WHERE u.id = ? AND buyer.id = ?',
-      [order.vendor_id, order.buyer_id]
-    );
-    if (vendorRows[0]) {
-      emailService.sendEscrowNotification(
-        vendorRows[0].email, vendorRows[0].name,
-        'order_funded',
-        {
-          title: order.title,
-          order_ref: order.order_ref,
-          vendor_amount: order.vendor_amount,
-          buyer_name: vendorRows[0].buyer_name
-        }
-      ).catch(() => {}); // non-blocking
-    }
-
-    console.log(`✅ Escrow funded: Order ${order.order_ref} — ₦${order.amount}`);
   },
 
   // POST /payments/webhook — Paystack webhook handler
@@ -471,6 +491,7 @@ const paymentController = {
 
   // POST /payments/payout — vendor requests withdrawal
   requestPayout: async (req, res) => {
+    let conn;
     try {
       const userId = req.user.userId || req.user.id;
       const { amount, bank_code, account_number, bank_name } = req.body;
@@ -486,6 +507,7 @@ const paymentController = {
         return res.status(400).json({ error: 'Invalid amount' });
       }
 
+      // Early check for UX (non-authoritative — the atomic SQL check below is the real guard)
       if (withdrawAmount > parseFloat(wallet.available_balance)) {
         return res.status(400).json({ 
           error: 'Insufficient balance',
@@ -493,28 +515,43 @@ const paymentController = {
         });
       }
 
-      // Debit wallet
-      await pool.execute(
+      const txnRef = `payout_${Date.now()}_${userId}`;
+
+      // ── All payout mutations inside a single transaction ──
+      conn = await pool.getConnection();
+      await conn.beginTransaction();
+
+      // Atomic debit — the WHERE clause is the race-condition guard
+      const [debitResult] = await conn.execute(
         'UPDATE wallets SET available_balance = available_balance - ? WHERE id = ? AND available_balance >= ?',
         [withdrawAmount, wallet.id, withdrawAmount]
       );
 
-      const txnRef = `payout_${Date.now()}_${userId}`;
+      if (debitResult.affectedRows === 0) {
+        await conn.rollback();
+        return res.status(400).json({ 
+          error: 'Insufficient balance (concurrent withdrawal detected)',
+          available: parseFloat(wallet.available_balance)
+        });
+      }
 
       // Record transaction
-      await pool.execute(
+      await conn.execute(
         `INSERT INTO transactions (reference, type, amount, debit_wallet_id, description, status)
          VALUES (?, 'withdrawal', ?, ?, ?, 'completed')`,
         [txnRef, withdrawAmount, wallet.id, `Withdrawal to ${bank_name || 'bank'} ****${account_number.slice(-4)}`]
       );
 
       // Record payout
-      const [result] = await pool.execute(
+      const [result] = await conn.execute(
         `INSERT INTO payouts (user_id, wallet_id, amount, bank_code, bank_name, account_number, status, transfer_reference)
          VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
         [userId, wallet.id, withdrawAmount, bank_code, bank_name || '', account_number, txnRef]
       );
 
+      await conn.commit();
+
+      // Paystack transfer happens outside the transaction (external API call)
       if (!paystack.isMockMode()) {
         // Create transfer recipient + initiate transfer via Paystack
         const recipient = await paystack.request('POST', '/transferrecipient', {
@@ -554,8 +591,11 @@ const paymentController = {
         mock_mode: paystack.isMockMode()
       });
     } catch (err) {
+      if (conn) await conn.rollback().catch(() => {});
       console.error('Payout error:', err);
       res.status(500).json({ error: 'Failed to process payout' });
+    } finally {
+      if (conn) conn.release();
     }
   }
 };

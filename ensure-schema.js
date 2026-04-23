@@ -351,7 +351,7 @@ async function ensureSchema() {
         CREATE TABLE IF NOT EXISTS transactions (
             id INT AUTO_INCREMENT PRIMARY KEY,
             reference VARCHAR(255) UNIQUE NOT NULL,
-            type ENUM('deposit','withdrawal','escrow_lock','escrow_release','refund') NOT NULL,
+            type ENUM('deposit','withdrawal','escrow_lock','escrow_release','escrow_refund','commission','refund') NOT NULL,
             amount DECIMAL(15,2) NOT NULL,
             debit_wallet_id INT NULL,
             credit_wallet_id INT NULL,
@@ -363,23 +363,46 @@ async function ensureSchema() {
     `, 'transactions table');
 
     await run(`
+        ALTER TABLE transactions MODIFY COLUMN type ENUM('deposit','withdrawal','escrow_lock','escrow_release','escrow_refund','commission','refund') NOT NULL
+    `, 'update transactions type enum');
+
+    await run(`
         CREATE TABLE IF NOT EXISTS escrow_orders (
             id INT AUTO_INCREMENT PRIMARY KEY,
             order_ref VARCHAR(50) UNIQUE NOT NULL,
             buyer_id INT NOT NULL,
             vendor_id INT NOT NULL,
             amount DECIMAL(15,2) NOT NULL,
+            title VARCHAR(255) NOT NULL DEFAULT '',
             description TEXT NOT NULL,
-            status ENUM('pending','funded','delivered','completed','disputed','refunded','cancelled') DEFAULT 'pending',
+            commission_rate DECIMAL(5,4) DEFAULT 0.0250,
+            commission_amount DECIMAL(15,2) DEFAULT 0.00,
+            vendor_amount DECIMAL(15,2) DEFAULT 0.00,
+            status ENUM('pending','funded','delivered','completed','disputed','released','refunded','cancelled') DEFAULT 'pending',
             payment_reference VARCHAR(255) NULL,
             funded_at TIMESTAMP NULL,
             delivered_at TIMESTAMP NULL,
             completed_at TIMESTAMP NULL,
+            disputed_at TIMESTAMP NULL,
             dispute_reason TEXT NULL,
+            dispute_resolved_by INT NULL,
+            resolved_at TIMESTAMP NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )
     `, 'escrow_orders table');
+
+    // ALTER fallbacks for existing escrow_orders tables
+    await run(`ALTER TABLE escrow_orders ADD COLUMN title VARCHAR(255) NOT NULL DEFAULT ''`, 'add title to escrow_orders');
+    await run(`ALTER TABLE escrow_orders ADD COLUMN commission_rate DECIMAL(5,4) DEFAULT 0.0250`, 'add commission_rate to escrow_orders');
+    await run(`ALTER TABLE escrow_orders ADD COLUMN commission_amount DECIMAL(15,2) DEFAULT 0.00`, 'add commission_amount to escrow_orders');
+    await run(`ALTER TABLE escrow_orders ADD COLUMN vendor_amount DECIMAL(15,2) DEFAULT 0.00`, 'add vendor_amount to escrow_orders');
+    await run(`ALTER TABLE escrow_orders ADD COLUMN disputed_at TIMESTAMP NULL`, 'add disputed_at to escrow_orders');
+    await run(`ALTER TABLE escrow_orders ADD COLUMN dispute_resolved_by INT NULL`, 'add dispute_resolved_by to escrow_orders');
+    await run(`ALTER TABLE escrow_orders ADD COLUMN resolved_at TIMESTAMP NULL`, 'add resolved_at to escrow_orders');
+    await run(`
+        ALTER TABLE escrow_orders MODIFY COLUMN status ENUM('pending','funded','delivered','completed','disputed','released','refunded','cancelled') DEFAULT 'pending'
+    `, 'update escrow_orders status enum');
 
     await run(`
         CREATE TABLE IF NOT EXISTS dispute_messages (

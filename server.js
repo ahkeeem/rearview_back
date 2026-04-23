@@ -25,11 +25,8 @@ const io = socketIo(server, {
 // Initialize socket handlers
 messageHandler(io);
 
-// Make io available in request object
-app.use((req, res, next) => {
-  req.io = io;
-  next();
-});
+// Make io available to all request handlers via req.app.get('io')
+app.set('io', io);
 
 const PORT = process.env.PORT || 4000;
 
@@ -48,3 +45,34 @@ ensureSchema()
     console.error('FATAL: Schema ensure failed, refusing to start:', err);
     process.exit(1);
   });
+
+// ── Graceful Shutdown ──
+const gracefulShutdown = async (signal) => {
+  console.log(`\nReceived ${signal}. Starting graceful shutdown...`);
+  
+  server.close(async () => {
+    console.log('HTTP server closed.');
+    
+    // Close Database Pool
+    try {
+      const pool = require('./src/config/database');
+      await pool.end();
+      console.log('Database pool closed.');
+    } catch (err) {
+      console.error('Error closing database pool:', err);
+    }
+    
+    // Socket.io will automatically disconnect clients when the server closes
+    console.log('Shutdown complete.');
+    process.exit(0);
+  });
+  
+  // Force shutdown after 10 seconds
+  setTimeout(() => {
+    console.error('Could not close connections in time, forcefully shutting down');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

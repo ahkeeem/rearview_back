@@ -26,6 +26,10 @@ module.exports = {
 
   // Mock mode: when no real keys are set
   isMockMode() {
-    return this.SECRET_KEY === 'sk_test_xxxxxxxxxxxxx';
+    const isMock = this.SECRET_KEY === 'sk_test_xxxxxxxxxxxxx';
+    if (isMock && process.env.NODE_ENV === 'production') {
+      console.error('🚨 CRITICAL: Paystack is in MOCK MODE in production! Set PAYSTACK_SECRET_KEY to a real key.');
+    }
+    return isMock;
   }
 };
